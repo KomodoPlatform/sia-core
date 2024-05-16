@@ -257,3 +257,235 @@ func TestPolicyUnlockConditionEncodeSpecialCase(t *testing.T) {
 		t.Fatal("wrong address:", uc_inside_threshold_address.String())
 	}
 }
+
+// FIXME link to equivalent rust code once pushed
+// mm2src/coins/sia/transaction.rs test_siacoin_input_encode
+func TestSiacoinInputEncodeHash(t *testing.T) {
+	h := NewHasher()
+
+	uc := UnlockConditions{
+		Timelock: 0,
+		PublicKeys: []UnlockKey{
+			PublicKey{1, 2, 3}.UnlockKey(),
+		},
+		SignaturesRequired: 1,
+	}
+
+	vin := SiacoinInput{
+		ParentID:         SiacoinOutputID(Hash256{4, 5, 6}),
+		UnlockConditions: uc,
+	}
+
+	vin.EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:1d4b77aaa82c71ca68843210679b380f9638f8bec7addf0af16a6536dd54d6b4" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// FIXME mm2src/coins/sia/address.rs test_address_encode
+func TestSiacoinAddressEncodeHash(t *testing.T) {
+	h := NewHasher()
+
+	public_key := PublicKey{1, 2, 3}
+	addr := StandardUnlockHash(public_key)
+
+	addr.EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:d64b9a56043a909494f07520915e10dae62d75dba24b17c8414f8f3f30c53425" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/spend_policy.rs test_unlock_condition_encode
+func TestSiacoinUnlockConditionEncodeHash(t *testing.T) {
+	h := NewHasher()
+
+	uc := UnlockConditions{
+		Timelock: 0,
+		PublicKeys: []UnlockKey{
+			PublicKey{1, 2, 3}.UnlockKey(),
+		},
+		SignaturesRequired: 1,
+	}
+
+	uc.EncodeTo(h.E)
+
+	myhash := h.Sum()
+
+	if myhash.String() != "h:5d49bae37b97c86573a1525246270c180464acf33d63cc2ac0269ef9a8cb9d98" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/spend_policy.rs test_public_key_encode
+func TestSiacoinPublicKeyEncodeHash(t *testing.T) {
+	h := NewHasher()
+	publicKey := PublicKey{1, 2, 3}
+
+	publicKey.EncodeTo(h.E)
+
+	myhash := h.Sum()
+
+	if myhash.String() != "h:d487326614f066416308bf6aa4e5041d1949928e4b26ede98e3cebb36a3b1726" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/spend_policy.rs test_siacoin_currency_encode_v1
+func TestSiacoinCurrencyEncodeHashV1(t *testing.T) {
+	h := NewHasher()
+	currency := NewCurrency64(1)
+
+	V1Currency(currency).EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:a1cc3a97fc1ebfa23b0b128b153a29ad9f918585d1d8a32354f547d8451b7826" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/spend_policy.rs test_siacoin_currency_encode_v2
+func TestSiacoinCurrencyEncodeHashV2(t *testing.T) {
+	h := NewHasher()
+	currency := NewCurrency64(1)
+
+	V2Currency(currency).EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:a3865e5e284e12e0ea418e73127db5d1092bfb98ed372ca9a664504816375e1d" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/spend_policy.rs test_siacoin_currency_encode_v1
+func TestSiacoinCurrencyEncodeHashV1Max(t *testing.T) {
+	h := NewHasher()
+	currency := NewCurrency(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF)
+
+	V1Currency(currency).EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:4b9ed7269cb15f71ddf7238172a593a8e7ffe68b12c1bf73d67ac8eec44355bb" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/spend_policy.rs test_siacoin_currency_encode_v2_max
+func TestSiacoinCurrencyEncodeHashV2Max(t *testing.T) {
+	h := NewHasher()
+	currency := NewCurrency(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF)
+
+	V2Currency(currency).EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:681467b3337425fd38fa3983531ca1a6214de9264eebabdf9c9bc5d157d202b4" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/spend_policy.rs test_siacoin_output_encode_v1
+func TestSiacoinOutputEncodeHashV1(t *testing.T) {
+	h := NewHasher()
+	addr := StandardUnlockHash(PublicKey{1, 2, 3})
+	vout := SiacoinOutput{
+		Value:   NewCurrency64(1),
+		Address: addr,
+	}
+
+	V1SiacoinOutput(vout).EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:3253c57e76600721f2bdf03497a71ed47c09981e22ef49aed92e40da1ea91b28" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/spend_policy.rs test_siacoin_output_encode_v1
+func TestSiacoinOutputEncodeHashV2(t *testing.T) {
+	h := NewHasher()
+	addr := StandardUnlockHash(PublicKey{1, 2, 3})
+	vout := SiacoinOutput{
+		Value:   NewCurrency64(1),
+		Address: addr,
+	}
+
+	V2SiacoinOutput(vout).EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:c278eceae42f594f5f4ca52c8a84b749146d08af214cc959ed2aaaa916eaafd3" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/spend_policy.rs test_siacoin_output_encode_v1
+func TestSiacoinInputEncodeHashV1(t *testing.T) {
+	h := NewHasher()
+	uc := UnlockConditions{
+		Timelock:           0,
+		PublicKeys:         []UnlockKey{},
+		SignaturesRequired: 0,
+	}
+	parent := SiacoinOutputID(Hash256{0})
+
+	vin := SiacoinInput{
+		ParentID:         parent,
+		UnlockConditions: uc,
+	}
+
+	vin.EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:2f806f905436dc7c5079ad8062467266e225d8110a3c58d17628d609cb1c99d0" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/transaction.rs test_state_element_encode
+func TestStateElementHash(t *testing.T) {
+	h := NewHasher()
+
+	se := StateElement{
+		ID:          Hash256{1, 2, 3},
+		LeafIndex:   1,
+		MerkleProof: []Hash256{{4, 5, 6}, {7, 8, 9}},
+	}
+
+	se.EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:bf6d7b74fb1e15ec4e86332b628a450e387c45b54ea98e57a6da8c9af317e468" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/transaction.rs test_siacoin_element_encode
+func TestSiacoinElementHash(t *testing.T) {
+	h := NewHasher()
+
+	stateElement := StateElement{
+		ID:          Hash256{1, 2, 3},
+		LeafIndex:   1,
+		MerkleProof: []Hash256{{4, 5, 6}, {7, 8, 9}},
+	}
+
+	addr := StandardUnlockHash(PublicKey{1, 2, 3})
+
+	siacoinElement := SiacoinElement{
+		StateElement: stateElement,
+		SiacoinOutput: SiacoinOutput{
+			Address: addr,
+			Value:   NewCurrency64(1),
+		},
+		MaturityHeight: 0,
+	}
+
+	siacoinElement.EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:3c867a54b7b3de349c56585f25a4365f31d632c3e42561b615055c77464d889e" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
