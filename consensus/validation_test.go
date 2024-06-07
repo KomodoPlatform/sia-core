@@ -5,10 +5,13 @@ import (
 	"errors"
 	"math"
 	"math/bits"
+	"strings"
 	"testing"
 	"time"
 
+	"go.sia.tech/core/internal/blake2b"
 	"go.sia.tech/core/types"
+	"lukechampine.com/frand"
 )
 
 func testnet() (*Network, types.Block) {
@@ -91,7 +94,7 @@ func (db *consensusDB) supplementTipBlock(b types.Block) (bs V1BlockSupplement) 
 	return bs
 }
 
-func (db *consensusDB) ancestorTimestamp(id types.BlockID) time.Time {
+func (db *consensusDB) ancestorTimestamp(types.BlockID) time.Time {
 	return time.Time{}
 }
 
@@ -406,14 +409,14 @@ func TestValidateBlock(t *testing.T) {
 				"siafund outputs exceed inputs",
 				func(b *types.Block) {
 					txn := &b.Transactions[0]
-					txn.SiafundOutputs[0].Value = txn.SiafundOutputs[0].Value + 1
+					txn.SiafundOutputs[0].Value++
 				},
 			},
 			{
 				"siafund outputs less than inputs",
 				func(b *types.Block) {
 					txn := &b.Transactions[0]
-					txn.SiafundOutputs[0].Value = txn.SiafundOutputs[0].Value - 1
+					txn.SiafundOutputs[0].Value--
 				},
 			},
 			{
@@ -588,7 +591,7 @@ func TestValidateBlock(t *testing.T) {
 				func(b *types.Block) {
 					txn := &b.Transactions[0]
 					txn.SiafundInputs = append(txn.SiafundInputs, txn.SiafundInputs[0])
-					txn.SiafundOutputs[0].Value = txn.SiafundOutputs[0].Value + 100
+					txn.SiafundOutputs[0].Value += 100
 				},
 			},
 			{
@@ -747,8 +750,11 @@ func TestValidateV2Block(t *testing.T) {
 	giftAmountSC := types.Siacoins(100)
 	giftAmountSF := uint64(100)
 	v1GiftFC := prepareContractFormation(renterPublicKey, hostPublicKey, types.Siacoins(1), types.Siacoins(1), 100, 100, types.VoidAddress)
+	v1GiftFC.Filesize = 65
+	v1GiftFC.FileMerkleRoot = blake2b.SumPair((State{}).StorageProofLeafHash([]byte{1}), (State{}).StorageProofLeafHash([]byte{2}))
 	v2GiftFC := types.V2FileContract{
 		Filesize:         v1GiftFC.Filesize,
+		FileMerkleRoot:   v1GiftFC.FileMerkleRoot,
 		ProofHeight:      20,
 		ExpirationHeight: 30,
 		RenterOutput:     v1GiftFC.ValidProofOutputs[0],
@@ -959,14 +965,14 @@ func TestValidateV2Block(t *testing.T) {
 				"siafund outputs exceed inputs",
 				func(b *types.Block) {
 					txn := &b.V2.Transactions[0]
-					txn.SiafundOutputs[0].Value = txn.SiafundOutputs[0].Value + 1
+					txn.SiafundOutputs[0].Value++
 				},
 			},
 			{
 				"siafund outputs less than inputs",
 				func(b *types.Block) {
 					txn := &b.V2.Transactions[0]
-					txn.SiafundOutputs[0].Value = txn.SiafundOutputs[0].Value - 1
+					txn.SiafundOutputs[0].Value--
 				},
 			},
 			{
@@ -1216,13 +1222,29 @@ func TestValidateV2Block(t *testing.T) {
 		V2: &types.V2BlockData{
 			Height: cs.Index.Height + 1,
 			Transactions: []types.V2Transaction{
-				{},
+				{
+					FileContractResolutions: []types.V2FileContractResolution{{
+						Parent: testFces[0],
+						Resolution: &types.V2StorageProof{
+							ProofIndex: cies[len(cies)-2],
+							Leaf:       [64]byte{1},
+							Proof:      []types.Hash256{cs.StorageProofLeafHash([]byte{2})},
+						},
+					}},
+				},
 			},
 		},
 		MinerPayouts: []types.SiacoinOutput{{
 			Address: types.VoidAddress,
 			Value:   cs.BlockReward(),
 		}},
+	}
+	if cs.StorageProofLeafIndex(testFces[0].V2FileContract.Filesize, cies[len(cies)-2].ChainIndex.ID, types.FileContractID(testFces[0].ID)) == 1 {
+		b.V2.Transactions[0].FileContractResolutions[0].Resolution = &types.V2StorageProof{
+			ProofIndex: cies[len(cies)-2],
+			Leaf:       [64]byte{2},
+			Proof:      []types.Hash256{cs.StorageProofLeafHash([]byte{1})},
+		}
 	}
 	signTxn(cs, &b.V2.Transactions[0])
 	b.V2.Commitment = cs.Commitment(cs.TransactionsCommitment(b.Transactions, b.V2Transactions()), b.MinerPayouts[0].Address)
@@ -1398,6 +1420,95 @@ func TestValidateV2Block(t *testing.T) {
 				t.Fatalf("accepted block with %v", test.desc)
 			}
 		}
+	}
+}
+
+func TestV2ImmatureSiacoinOutput(t *testing.T) {
+	n, genesisBlock := testnet()
+	n.HardforkV2.AllowHeight = 1
+
+	db, cs := newConsensusDB(n, genesisBlock)
+
+	pk := types.NewPrivateKeyFromSeed(frand.Bytes(32))
+	sp := types.PolicyPublicKey(pk.PublicKey())
+	addr := sp.Address()
+
+	utxos := make(map[types.SiacoinOutputID]types.SiacoinElement)
+	mineBlock := func(minerAddr types.Address, v2Txns []types.V2Transaction) error {
+		t.Helper()
+		b := types.Block{
+			ParentID:  cs.Index.ID,
+			Timestamp: time.Now(),
+			MinerPayouts: []types.SiacoinOutput{
+				{Address: minerAddr, Value: cs.BlockReward()},
+			},
+		}
+		if cs.Index.Height >= n.HardforkV2.AllowHeight {
+			b.V2 = &types.V2BlockData{
+				Height:       cs.Index.Height + 1,
+				Transactions: v2Txns,
+			}
+			b.V2.Commitment = cs.Commitment(cs.TransactionsCommitment(b.Transactions, b.V2Transactions()), minerAddr)
+		}
+
+		findBlockNonce(cs, &b)
+		if err := ValidateBlock(cs, b, db.supplementTipBlock(b)); err != nil {
+			return err
+		}
+
+		var cau ApplyUpdate
+		cs, cau = ApplyBlock(cs, b, db.supplementTipBlock(b), db.ancestorTimestamp(b.ParentID))
+		cau.ForEachSiacoinElement(func(sce types.SiacoinElement, spent bool) {
+			if spent {
+				delete(utxos, types.SiacoinOutputID(sce.ID))
+			} else if sce.SiacoinOutput.Address == addr {
+				utxos[types.SiacoinOutputID(sce.ID)] = sce
+			}
+		})
+
+		for id, sce := range utxos {
+			cau.UpdateElementProof(&sce.StateElement)
+			utxos[id] = sce
+		}
+
+		db.applyBlock(cau)
+		return nil
+	}
+
+	if err := mineBlock(addr, nil); err != nil {
+		t.Fatal(err)
+	} else if cs.Index.Height != 1 {
+		t.Fatalf("expected height %v, got %v", 1, cs.Index.Height)
+	} else if len(utxos) != 1 {
+		t.Fatalf("expected %v utxos, got %v", 1, len(utxos))
+	}
+
+	// grab the one element
+	var sce types.SiacoinElement
+	for _, sce = range utxos {
+		break
+	}
+
+	// construct a transaction using the immature miner payout utxo
+	txn := types.V2Transaction{
+		SiacoinInputs: []types.V2SiacoinInput{
+			{
+				Parent: sce,
+			},
+		},
+		SiacoinOutputs: []types.SiacoinOutput{
+			{Address: types.VoidAddress, Value: sce.SiacoinOutput.Value},
+		},
+	}
+	sigHash := cs.InputSigHash(txn)
+	txn.SiacoinInputs[0].SatisfiedPolicy = types.SatisfiedPolicy{
+		Policy:     sp,
+		Signatures: []types.Signature{pk.SignHash(sigHash)},
+	}
+
+	// check for immature payout error
+	if err := mineBlock(types.VoidAddress, []types.V2Transaction{txn}); !strings.Contains(err.Error(), "has immature parent") {
+		t.Fatalf("expected immature output err, got %v", err)
 	}
 }
 
