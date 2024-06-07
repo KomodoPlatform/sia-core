@@ -1,8 +1,12 @@
-package types
+package types_test
 
 import (
+	"encoding/hex"
 	"testing"
 	"time"
+
+	"go.sia.tech/core/consensus"
+	. "go.sia.tech/core/types"
 )
 
 /*
@@ -13,7 +17,11 @@ If any tests within this file fail at any point in the future, it's an indictati
 Verbose as possible to enable quickly identifying the source of any discrepancies.
 */
 
-// https://github.com/KomodoPlatform/komodo-defi-framework/blob/d180505b43f8167bd733263e73804ea60d4c1632/mm2src/coins/sia/spend_policy.rs#L189
+func TestTestnet(t *testing.T) {
+	_, _ = consensus.Testnet()
+}
+
+// https://github.com/KomodoPlatform/komodo-defi-framew11ork/blob/d180505b43f8167bd733263e73804ea60d4c1632/mm2src/coins/sia/spend_policy.rs#L189
 func TestStandardUnlockHash(t *testing.T) {
 	pk := PublicKey{1, 2, 3}
 	p := SpendPolicy{PolicyTypeUnlockConditions(StandardUnlockConditions(pk))}
@@ -33,8 +41,8 @@ func TestUnlockConditions2of2Multisig(t *testing.T) {
 			PublicKey{1, 1, 1}.UnlockKey()},
 		SignaturesRequired: 2,
 	}
-	if unlockConditionsRoot(uc).String() != "addr:1e94357817d236167e54970a8c08bbd41b37bfceeeb52f6c1ce6dd01d50ea1e73a7c081d3178" {
-		t.Fatal("wrong address:", uc, unlockConditionsRoot(uc).String())
+	if UnlockConditionsRoot(uc).String() != "addr:1e94357817d236167e54970a8c08bbd41b37bfceeeb52f6c1ce6dd01d50ea1e73a7c081d3178" {
+		t.Fatal("wrong address:", uc, UnlockConditionsRoot(uc).String())
 	}
 }
 
@@ -47,8 +55,8 @@ func TestUnlockConditions1of2Multisig(t *testing.T) {
 			PublicKey{1, 1, 1}.UnlockKey()},
 		SignaturesRequired: 1,
 	}
-	if unlockConditionsRoot(uc).String() != "addr:d7f84e3423da09d111a17f64290c8d05e1cbe4cab2b6bed49e3a4d2f659f0585264e9181a51a" {
-		t.Fatal("wrong address:", uc, unlockConditionsRoot(uc).String())
+	if UnlockConditionsRoot(uc).String() != "addr:d7f84e3423da09d111a17f64290c8d05e1cbe4cab2b6bed49e3a4d2f659f0585264e9181a51a" {
+		t.Fatal("wrong address:", uc, UnlockConditionsRoot(uc).String())
 	}
 }
 
@@ -444,7 +452,7 @@ func TestSiacoinInputEncodeHashV1(t *testing.T) {
 }
 
 // mm2src/coins/sia/transaction.rs test_state_element_encode
-func TestStateElementHash(t *testing.T) {
+func TestStateElementEncodeHash(t *testing.T) {
 	h := NewHasher()
 
 	se := StateElement{
@@ -462,7 +470,7 @@ func TestStateElementHash(t *testing.T) {
 }
 
 // mm2src/coins/sia/transaction.rs test_siacoin_element_encode
-func TestSiacoinElementHash(t *testing.T) {
+func TestSiacoinElementEncodeHash(t *testing.T) {
 	h := NewHasher()
 
 	stateElement := StateElement{
@@ -486,6 +494,37 @@ func TestSiacoinElementHash(t *testing.T) {
 	myhash := h.Sum()
 
 	if myhash.String() != "h:3c867a54b7b3de349c56585f25a4365f31d632c3e42561b615055c77464d889e" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// mm2src/coins/sia/transaction.rs test_signature_encode
+func TestSignatureEncodeHash(t *testing.T) {
+	h := NewHasher()
+
+	hexStr := "105641BF4AE119CB15617FC9658BEE5D448E2CC27C9BC3369F4BA5D0E1C3D01EBCB21B669A7B7A17CF8457189EAA657C41D4A2E6F9E0F25D0996D3A17170F309" // Replace this with your hex string
+	bytes, _ := hex.DecodeString(hexStr)
+
+	var signature Signature
+	copy(signature[:], bytes)
+
+	signature.EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:1e6952fe04eb626ae759a0090af2e701ba35ee6ad15233a2e947cb0f7ae9f7c7" {
+		t.Fatal("wrong hash:", myhash.String())
+	}
+}
+
+// must be reported to Nate... demonstrates a critical bug in their encoding
+func TestSatisfiedPolicyEncodeHash(t *testing.T) {
+	h := NewHasher()
+
+	sp := SatisfiedPolicy{Policy: PolicyPublicKey(PublicKey{1, 2, 3})}
+	sp.EncodeTo(h.E)
+	myhash := h.Sum()
+
+	if myhash.String() != "h:bf9a1b1602e2fab06b72b65fc40dd937ae245048cdd3690c572c5da5eb133a3c" {
 		t.Fatal("wrong hash:", myhash.String())
 	}
 }
