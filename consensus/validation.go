@@ -153,7 +153,7 @@ func validateCurrencyOverflow(ms *MidState, txn types.Transaction) error {
 	return nil
 }
 
-func validateMinimumValues(ms *MidState, txn types.Transaction) error {
+func validateMinimumValues(_ *MidState, txn types.Transaction) error {
 	zero := false
 	for _, sco := range txn.SiacoinOutputs {
 		zero = zero || sco.Value.IsZero()
@@ -338,7 +338,7 @@ func validateFileContracts(ms *MidState, txn types.Transaction, ts V1Transaction
 		buf[0] = 0 // leaf hash prefix
 		copy(buf[1:], leaf)
 		root := types.HashBytes(buf)
-		subtreeHeight := bits.Len64(leafIndex ^ (lastLeafIndex(filesize)))
+		subtreeHeight := bits.Len64(leafIndex ^ lastLeafIndex(filesize))
 		for i, h := range proof {
 			if leafIndex&(1<<i) != 0 || i >= subtreeHeight {
 				root = blake2b.SumPair(h, root)
@@ -578,6 +578,8 @@ func validateV2Siacoins(ms *MidState, txn types.V2Transaction) error {
 			return fmt.Errorf("siacoin input %v double-spends parent output (previously spent in %v)", i, txid)
 		} else if j, ok := spent[sci.Parent.ID]; ok {
 			return fmt.Errorf("siacoin input %v double-spends parent output (previously spent by input %v)", i, j)
+		} else if sci.Parent.MaturityHeight > ms.base.childHeight() {
+			return fmt.Errorf("siacoin input %v has immature parent", i)
 		}
 		spent[sci.Parent.ID] = i
 

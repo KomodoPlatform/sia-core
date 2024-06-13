@@ -804,7 +804,7 @@ func (b *Block) ID() BlockID {
 // Implementations of fmt.Stringer, encoding.Text(Un)marshaler, and json.(Un)marshaler
 
 func stringerHex(prefix string, data []byte) string {
-	return prefix + ":" + hex.EncodeToString(data[:])
+	return prefix + ":" + hex.EncodeToString(data)
 }
 
 func marshalHex(prefix string, data []byte) ([]byte, error) {
@@ -812,8 +812,12 @@ func marshalHex(prefix string, data []byte) ([]byte, error) {
 }
 
 func unmarshalHex(dst []byte, prefix string, data []byte) error {
-	n, err := hex.Decode(dst, bytes.TrimPrefix(data, []byte(prefix+":")))
-	if n < len(dst) {
+	data = bytes.TrimPrefix(data, []byte(prefix+":"))
+	if len(data) > len(dst)*2 {
+		return fmt.Errorf("decoding %v:<hex> failed: input too long", prefix)
+	}
+	n, err := hex.Decode(dst, data)
+	if err == nil && n < len(dst) {
 		err = io.ErrUnexpectedEOF
 	}
 	if err != nil {
@@ -897,7 +901,7 @@ func (s *Specifier) UnmarshalText(b []byte) error {
 
 // MarshalText implements encoding.TextMarshaler.
 func (uk UnlockKey) MarshalText() ([]byte, error) {
-	return marshalHex(uk.Algorithm.String(), uk.Key[:])
+	return marshalHex(uk.Algorithm.String(), uk.Key)
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
