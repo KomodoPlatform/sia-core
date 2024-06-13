@@ -18,6 +18,14 @@ type Encoder struct {
 	err error
 }
 
+func (e *Encoder) Buf() []byte {
+	return e.buf[:e.n]
+}
+
+func (e *Encoder) N() int {
+	return e.n
+}
+
 // Flush writes any pending data to the underlying stream. It returns the first
 // error encountered by the Encoder.
 func (e *Encoder) Flush() error {

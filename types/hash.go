@@ -130,6 +130,11 @@ func StandardUnlockHash(pk PublicKey) Address {
 	return Address(blake2b.SumPair(blake2b.SumPair(timelockHash, pubkeyHash), sigsrequiredHash))
 }
 
+// must be exportable for rust_port_test.go
+func UnlockConditionsRoot(uc UnlockConditions) Address {
+	return unlockConditionsRoot(uc)
+}
+
 func unlockConditionsRoot(uc UnlockConditions) Address {
 	h := hasherPool.Get().(*Hasher)
 	defer hasherPool.Put(h)
