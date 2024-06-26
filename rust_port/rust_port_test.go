@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/core/consensus"
 	. "go.sia.tech/core/rust_port/util"
 	. "go.sia.tech/core/types"
 )
@@ -17,10 +16,6 @@ If any tests within this file fail at any point in the future, it's an indictati
 
 Verbose as possible to enable quickly identifying the source of any discrepancies.
 */
-
-func TestTestnet(t *testing.T) {
-	_, _ = consensus.Testnet()
-}
 
 // https://github.com/KomodoPlatform/komodo-defi-framew11ork/blob/d180505b43f8167bd733263e73804ea60d4c1632/mm2src/coins/sia/spend_policy.rs#L189
 func TestStandardUnlockHash(t *testing.T) {
@@ -470,6 +465,23 @@ func TestStateElementEncodeHash(t *testing.T) {
 	}
 }
 
+// mm2src/coins/sia/transaction.rs test_state_element_encode
+func TestStateElementEncodeHashNullMerkleProof(t *testing.T) {
+	h := NewHasher()
+
+	se := StateElement{
+		ID:        Hash256{1, 2, 3},
+		LeafIndex: 1,
+	}
+
+	se.EncodeTo(h.E)
+	myHash := h.Sum()
+
+	if myHash.String() != "h:bf6d7b74fb1e15ec4e86332b628a450e387c45b54ea98e57a6da8c9af317e468" {
+		t.Fatal("wrong hash:", myHash.String())
+	}
+}
+
 // mm2src/coins/sia/transaction.rs test_siacoin_element_encode
 func TestSiacoinElementEncodeHash(t *testing.T) {
 	h := NewHasher()
@@ -789,6 +801,194 @@ func TestSiacoinInputEncodeV2(t *testing.T) {
 	myHash := h.Sum()
 
 	if myHash.String() != "h:a8ab11b91ee19ce68f2d608bd4d19212841842f0c50151ae4ccb8e9db68cd6c4" {
+		t.Fatal("wrong hash:", myHash.String())
+	}
+}
+
+// mm2src/coins/sia/spend_policy.rs test_attestation_encode
+func TestAttestationEncode(t *testing.T) {
+	h := NewHasher()
+
+	publicKey := PublicKeyFromHex("0102030000000000000000000000000000000000000000000000000000000000")
+	signature := SignatureFromHex("105641BF4AE119CB15617FC9658BEE5D448E2CC27C9BC3369F4BA5D0E1C3D01EBCB21B669A7B7A17CF8457189EAA657C41D4A2E6F9E0F25D0996D3A17170F309")
+
+	attestation := Attestation{
+		PublicKey: publicKey,
+		Key:       "HostAnnouncement",
+		Value:     []byte{1, 2, 3, 4},
+		Signature: signature,
+	}
+
+	attestation.EncodeTo(h.E)
+	println("buf: ", hex.EncodeToString(h.E.Buf()[:h.E.N()]))
+	myHash := h.Sum()
+
+	if myHash.String() != "h:b28b32c6f91d1b57ab4a9ea9feecca16b35bb8febdee6a0162b22979415f519d" {
+		t.Fatal("wrong hash:", myHash.String())
+	}
+}
+
+// mm2src/coins/sia/transaction.rs test_file_contract_v2_encode
+func TestFileContractV2Encode(t *testing.T) {
+	h := NewHasher()
+
+	pubkey0 := PublicKeyFromHex("0102030000000000000000000000000000000000000000000000000000000000")
+	pubkey1 := PublicKeyFromHex("06C87838297B7BB16AB23946C99DFDF77FF834E35DB07D71E9B1D2B01A11E96D")
+
+	sig0 := SignatureFromHex("105641BF4AE119CB15617FC9658BEE5D448E2CC27C9BC3369F4BA5D0E1C3D01EBCB21B669A7B7A17CF8457189EAA657C41D4A2E6F9E0F25D0996D3A17170F309")
+	sig1 := SignatureFromHex("0734761D562958F6A82819474171F05A40163901513E5858BFF9E4BD9CAFB04DEF0D6D345BACE7D14E50C5C523433B411C7D7E1618BE010A63C55C34A2DEE70A")
+
+	address0 := StandardUnlockHash(pubkey0)
+	address1 := StandardUnlockHash(pubkey1)
+
+	vout0 := SiacoinOutput{
+		Value:   NewCurrency64(1),
+		Address: address0,
+	}
+	vout1 := SiacoinOutput{
+		Value:   NewCurrency64(1),
+		Address: address1,
+	}
+
+	contract := V2FileContract{
+		Filesize:         1,
+		FileMerkleRoot:   Hash256{0},
+		ProofHeight:      1,
+		ExpirationHeight: 1,
+		RenterOutput:     vout0,
+		HostOutput:       vout1,
+		MissedHostValue:  NewCurrency64(1),
+		TotalCollateral:  NewCurrency64(1),
+		RenterPublicKey:  pubkey0,
+		HostPublicKey:    pubkey1,
+		RevisionNumber:   1,
+		RenterSignature:  sig0,
+		HostSignature:    sig1,
+	}
+
+	contract.EncodeTo(h.E)
+	myHash := h.Sum()
+
+	if myHash.String() != "h:6171a8d8ec31e06f80d46efbd1aecf2c5a7c344b5f2a2d4f660654b0cb84113c" {
+		t.Fatal("wrong hash:", myHash.String())
+	}
+}
+
+// mm2src/coins/sia/transaction.rs test_file_contract_element_v2_encode
+func TestFileContractElementV2Encode(t *testing.T) {
+	h := NewHasher()
+
+	pubkey0 := PublicKeyFromHex("0102030000000000000000000000000000000000000000000000000000000000")
+	pubkey1 := PublicKeyFromHex("06C87838297B7BB16AB23946C99DFDF77FF834E35DB07D71E9B1D2B01A11E96D")
+
+	sig0 := SignatureFromHex("105641BF4AE119CB15617FC9658BEE5D448E2CC27C9BC3369F4BA5D0E1C3D01EBCB21B669A7B7A17CF8457189EAA657C41D4A2E6F9E0F25D0996D3A17170F309")
+	sig1 := SignatureFromHex("0734761D562958F6A82819474171F05A40163901513E5858BFF9E4BD9CAFB04DEF0D6D345BACE7D14E50C5C523433B411C7D7E1618BE010A63C55C34A2DEE70A")
+
+	address0 := StandardUnlockHash(pubkey0)
+	address1 := StandardUnlockHash(pubkey1)
+
+	vout0 := SiacoinOutput{
+		Value:   NewCurrency64(1),
+		Address: address0,
+	}
+	vout1 := SiacoinOutput{
+		Value:   NewCurrency64(1),
+		Address: address1,
+	}
+
+	contract := V2FileContract{
+		Filesize:         1,
+		FileMerkleRoot:   Hash256{0},
+		ProofHeight:      1,
+		ExpirationHeight: 1,
+		RenterOutput:     vout0,
+		HostOutput:       vout1,
+		MissedHostValue:  NewCurrency64(1),
+		TotalCollateral:  NewCurrency64(1),
+		RenterPublicKey:  pubkey0,
+		HostPublicKey:    pubkey1,
+		RevisionNumber:   1,
+		RenterSignature:  sig0,
+		HostSignature:    sig1,
+	}
+
+	stateElement := StateElement{
+		ID:          Hash256{1, 2, 3},
+		LeafIndex:   1,
+		MerkleProof: []Hash256{{4, 5, 6}, {7, 8, 9}},
+	}
+
+	contractElement := V2FileContractElement{
+		StateElement:   stateElement,
+		V2FileContract: contract,
+	}
+
+	contractElement.EncodeTo(h.E)
+	myHash := h.Sum()
+
+	if myHash.String() != "h:4cde411635118b2b7e1b019c659a2327ada53b303da0e46524e604d228fcd039" {
+		t.Fatal("wrong hash:", myHash.String())
+	}
+}
+
+// mm2src/coins/sia/transaction.rs test_file_contract_element_v2_encode
+func TestFileContractRevisionV2Encode(t *testing.T) {
+	h := NewHasher()
+
+	pubkey0 := PublicKeyFromHex("0102030000000000000000000000000000000000000000000000000000000000")
+	pubkey1 := PublicKeyFromHex("06C87838297B7BB16AB23946C99DFDF77FF834E35DB07D71E9B1D2B01A11E96D")
+
+	sig0 := SignatureFromHex("105641BF4AE119CB15617FC9658BEE5D448E2CC27C9BC3369F4BA5D0E1C3D01EBCB21B669A7B7A17CF8457189EAA657C41D4A2E6F9E0F25D0996D3A17170F309")
+	sig1 := SignatureFromHex("0734761D562958F6A82819474171F05A40163901513E5858BFF9E4BD9CAFB04DEF0D6D345BACE7D14E50C5C523433B411C7D7E1618BE010A63C55C34A2DEE70A")
+
+	address0 := StandardUnlockHash(pubkey0)
+	address1 := StandardUnlockHash(pubkey1)
+
+	vout0 := SiacoinOutput{
+		Value:   NewCurrency64(1),
+		Address: address0,
+	}
+	vout1 := SiacoinOutput{
+		Value:   NewCurrency64(1),
+		Address: address1,
+	}
+
+	contract := V2FileContract{
+		Filesize:         1,
+		FileMerkleRoot:   Hash256{0},
+		ProofHeight:      1,
+		ExpirationHeight: 1,
+		RenterOutput:     vout0,
+		HostOutput:       vout1,
+		MissedHostValue:  NewCurrency64(1),
+		TotalCollateral:  NewCurrency64(1),
+		RenterPublicKey:  pubkey0,
+		HostPublicKey:    pubkey1,
+		RevisionNumber:   1,
+		RenterSignature:  sig0,
+		HostSignature:    sig1,
+	}
+
+	stateElement := StateElement{
+		ID:          Hash256{1, 2, 3},
+		LeafIndex:   1,
+		MerkleProof: []Hash256{{4, 5, 6}, {7, 8, 9}},
+	}
+
+	contractElement := V2FileContractElement{
+		StateElement:   stateElement,
+		V2FileContract: contract,
+	}
+
+	contractRevision := V2FileContractRevision{
+		Parent:   contractElement,
+		Revision: contract,
+	}
+
+	contractRevision.EncodeTo(h.E)
+	myHash := h.Sum()
+
+	if myHash.String() != "h:22d5d1fd8c2762758f6b6ecf7058d73524ef209ac5a64f160b71ce91677db9a6" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
