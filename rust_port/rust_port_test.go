@@ -465,7 +465,7 @@ func TestStateElementEncodeHash(t *testing.T) {
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_state_element_encode
+// mm2src/coins/sia/transaction.rs test_state_element_encode_null_merkle_proof
 func TestStateElementEncodeHashNullMerkleProof(t *testing.T) {
 	h := NewHasher()
 
@@ -477,7 +477,7 @@ func TestStateElementEncodeHashNullMerkleProof(t *testing.T) {
 	se.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:bf6d7b74fb1e15ec4e86332b628a450e387c45b54ea98e57a6da8c9af317e468" {
+	if myHash.String() != "h:d69bc48bc797aff93050447aff0a3f7c4d489705378c122cd123841fe7778a3e" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
