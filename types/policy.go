@@ -177,20 +177,31 @@ func (p SpendPolicy) Verify(height uint64, medianTimestamp time.Time, sigHash Ha
 		case PolicyTypeUnlockConditions:
 			if err := verify(PolicyAbove(p.Timelock)); err != nil {
 				return err
-			} else if p.SignaturesRequired > 255 {
-				return fmt.Errorf("too many signatures required (%v > 255)", p.SignaturesRequired)
 			}
-			n := uint8(p.SignaturesRequired)
-			of := make([]SpendPolicy, len(p.PublicKeys))
 			for i, pk := range p.PublicKeys {
-				if pk.Algorithm != SpecifierEd25519 {
-					return fmt.Errorf("unsupported algorithm %v", pk.Algorithm)
-				} else if len(pk.Key) != len(PublicKey{}) {
-					return fmt.Errorf("invalid Ed25519 key length %v", len(pk.Key))
+				if p.SignaturesRequired == 0 || p.SignaturesRequired > uint64(len(p.PublicKeys[i:])) || p.SignaturesRequired > uint64(len(sigs)) {
+					break
 				}
-				of[i] = PolicyPublicKey(*(*PublicKey)(pk.Key))
+				switch pk.Algorithm {
+				case SpecifierEntropy:
+					return errors.New("policy uses an entropy public key")
+				case SpecifierEd25519:
+					var epk PublicKey
+					copy(epk[:], pk.Key)
+					if epk.VerifyHash(sigHash, sigs[0]) {
+						sigs = sigs[1:]
+						p.SignaturesRequired--
+					}
+				default:
+					// all other algorithms are considered valid by default
+					sigs = sigs[1:]
+					p.SignaturesRequired--
+				}
 			}
-			return verify(PolicyThreshold(n, of))
+			if p.SignaturesRequired == 0 {
+				return nil
+			}
+			return errors.New("threshold not reached")
 		default:
 			panic("invalid policy type") // developer error
 		}
@@ -279,7 +290,7 @@ func ParseSpendPolicy(s string) (SpendPolicy, error) {
 		}
 		t := s[:i]
 		s = s[i:]
-		return t
+		return strings.TrimSpace(t)
 	}
 	consume := func(b byte) {
 		if err != nil {
@@ -295,6 +306,7 @@ func ParseSpendPolicy(s string) (SpendPolicy, error) {
 		}
 	}
 	peek := func() byte {
+		s = strings.TrimSpace(s)
 		if err != nil || len(s) == 0 {
 			return 0
 		}
