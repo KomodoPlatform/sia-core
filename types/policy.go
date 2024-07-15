@@ -1,7 +1,6 @@
 package types
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -56,8 +55,8 @@ func PolicyHash(h Hash256) SpendPolicy {
 
 // PolicyTypeThreshold requires at least N sub-policies to be satisfied.
 type PolicyTypeThreshold struct {
-	N  uint8
-	Of []SpendPolicy
+	N  uint8         `json:"n"`
+	Of []SpendPolicy `json:"of"`
 }
 
 // PolicyThreshold returns a policy that requires at least N sub-policies to be
@@ -177,20 +176,31 @@ func (p SpendPolicy) Verify(height uint64, medianTimestamp time.Time, sigHash Ha
 		case PolicyTypeUnlockConditions:
 			if err := verify(PolicyAbove(p.Timelock)); err != nil {
 				return err
-			} else if p.SignaturesRequired > 255 {
-				return fmt.Errorf("too many signatures required (%v > 255)", p.SignaturesRequired)
 			}
-			n := uint8(p.SignaturesRequired)
-			of := make([]SpendPolicy, len(p.PublicKeys))
 			for i, pk := range p.PublicKeys {
-				if pk.Algorithm != SpecifierEd25519 {
-					return fmt.Errorf("unsupported algorithm %v", pk.Algorithm)
-				} else if len(pk.Key) != len(PublicKey{}) {
-					return fmt.Errorf("invalid Ed25519 key length %v", len(pk.Key))
+				if p.SignaturesRequired == 0 || p.SignaturesRequired > uint64(len(p.PublicKeys[i:])) || p.SignaturesRequired > uint64(len(sigs)) {
+					break
 				}
-				of[i] = PolicyPublicKey(*(*PublicKey)(pk.Key))
+				switch pk.Algorithm {
+				case SpecifierEntropy:
+					return errors.New("policy uses an entropy public key")
+				case SpecifierEd25519:
+					var epk PublicKey
+					copy(epk[:], pk.Key)
+					if epk.VerifyHash(sigHash, sigs[0]) {
+						sigs = sigs[1:]
+						p.SignaturesRequired--
+					}
+				default:
+					// all other algorithms are considered valid by default
+					sigs = sigs[1:]
+					p.SignaturesRequired--
+				}
 			}
-			return verify(PolicyThreshold(n, of))
+			if p.SignaturesRequired == 0 {
+				return nil
+			}
+			return errors.New("threshold not reached")
 		default:
 			panic("invalid policy type") // developer error
 		}
@@ -279,7 +289,7 @@ func ParseSpendPolicy(s string) (SpendPolicy, error) {
 		}
 		t := s[:i]
 		s = s[i:]
-		return t
+		return strings.TrimSpace(t)
 	}
 	consume := func(b byte) {
 		if err != nil {
@@ -295,6 +305,7 @@ func ParseSpendPolicy(s string) (SpendPolicy, error) {
 		}
 	}
 	peek := func() byte {
+		s = strings.TrimSpace(s)
 		if err != nil || len(s) == 0 {
 			return 0
 		}
@@ -404,25 +415,78 @@ func ParseSpendPolicy(s string) (SpendPolicy, error) {
 	return p, err
 }
 
-// MarshalText implements encoding.TextMarshaler.
-func (p SpendPolicy) MarshalText() ([]byte, error) {
-	return []byte(p.String()), nil
-}
-
-// UnmarshalText implements encoding.TextUnmarshaler.
-func (p *SpendPolicy) UnmarshalText(b []byte) (err error) {
-	*p, err = ParseSpendPolicy(string(b))
-	return
-}
-
 // MarshalJSON implements json.Marshaler.
 func (p SpendPolicy) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + p.String() + `"`), nil
+	var v struct {
+		Type   string      `json:"type"`
+		Policy interface{} `json:"policy"`
+	}
+	switch p := p.Type.(type) {
+	case PolicyTypeAbove:
+		v.Type = "above"
+		v.Policy = uint64(p)
+	case PolicyTypeAfter:
+		v.Type = "after"
+		v.Policy = time.Time(p).Unix()
+	case PolicyTypePublicKey:
+		v.Type = "pk"
+		v.Policy = PublicKey(p)
+	case PolicyTypeHash:
+		v.Type = "h"
+		v.Policy = Hash256(p)
+	case PolicyTypeThreshold:
+		v.Type = "thresh"
+		v.Policy = p
+	case PolicyTypeOpaque:
+		v.Type = "opaque"
+		v.Policy = Address(p)
+	case PolicyTypeUnlockConditions:
+		v.Type = "uc"
+		v.Policy = UnlockConditions(p)
+	}
+	return json.Marshal(v)
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *SpendPolicy) UnmarshalJSON(b []byte) (err error) {
-	return p.UnmarshalText(bytes.Trim(b, `"`))
+	var v struct {
+		Type   string          `json:"type"`
+		Policy json.RawMessage `json:"policy"`
+	}
+	if err = json.Unmarshal(b, &v); err != nil {
+		return
+	}
+	switch v.Type {
+	case "above":
+		var pt PolicyTypeAbove
+		err = json.Unmarshal(v.Policy, (*uint64)(&pt))
+		p.Type = pt
+	case "after":
+		var pt int64
+		err = json.Unmarshal(v.Policy, &pt)
+		p.Type = PolicyTypeAfter(time.Unix(pt, 0))
+	case "pk":
+		var pt PolicyTypePublicKey
+		err = json.Unmarshal(v.Policy, (*PublicKey)(&pt))
+		p.Type = pt
+	case "h":
+		var pt PolicyTypeHash
+		err = json.Unmarshal(v.Policy, (*Hash256)(&pt))
+		p.Type = pt
+	case "thresh":
+		var pt PolicyTypeThreshold
+		err = json.Unmarshal(v.Policy, &pt)
+		p.Type = pt
+	case "opaque":
+		var pt PolicyTypeOpaque
+		err = json.Unmarshal(v.Policy, (*Address)(&pt))
+		p.Type = pt
+	case "uc":
+		var pt PolicyTypeUnlockConditions
+		err = json.Unmarshal(v.Policy, (*UnlockConditions)(&pt))
+		p.Type = pt
+	}
+	return
 }
 
 // A SatisfiedPolicy pairs a policy with the signatures and preimages that

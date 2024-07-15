@@ -30,11 +30,15 @@ const (
 	// a FileContract.
 	HostContractIndex = 1
 
-	// EphemeralLeafIndex is used as the LeafIndex of StateElements that are created
-	// and spent within the same block. Such elements do not require a proof of
-	// existence. They are, however, assigned a proper index and are incorporated
-	// into the state accumulator when the block is processed.
-	EphemeralLeafIndex = math.MaxUint64
+	// UnassignedLeafIndex is a sentinel value used as the LeafIndex of
+	// StateElements that have not been added to the accumulator yet. This is
+	// necessary for constructing blocks sets where later transactions reference
+	// elements created in earlier transactions.
+	//
+	// Most clients do not need to reference this value directly, and should
+	// instead use the EphemeralSiacoinElement and EphemeralSiafundElement
+	// functions to construct dependent transaction sets.
+	UnassignedLeafIndex = 10101010101010101010
 )
 
 // Various specifiers.
@@ -114,6 +118,9 @@ type Specifier [16]byte
 
 // NewSpecifier returns a specifier containing the provided name.
 func NewSpecifier(name string) (s Specifier) {
+	if len(name) > len(s) {
+		panic(fmt.Sprintf("specifier name too long: len(%q) > 16", name))
+	}
 	copy(s[:], name)
 	return
 }
@@ -687,7 +694,7 @@ func (txn *V2Transaction) EphemeralSiacoinOutput(i int) SiacoinElement {
 	return SiacoinElement{
 		StateElement: StateElement{
 			ID:        Hash256(txn.SiacoinOutputID(txn.ID(), i)),
-			LeafIndex: EphemeralLeafIndex,
+			LeafIndex: UnassignedLeafIndex,
 		},
 		SiacoinOutput: txn.SiacoinOutputs[i],
 	}
@@ -699,7 +706,7 @@ func (txn *V2Transaction) EphemeralSiafundOutput(i int) SiafundElement {
 	return SiafundElement{
 		StateElement: StateElement{
 			ID:        Hash256(txn.SiafundOutputID(txn.ID(), i)),
-			LeafIndex: EphemeralLeafIndex,
+			LeafIndex: UnassignedLeafIndex,
 		},
 		SiafundOutput: txn.SiafundOutputs[i],
 	}
@@ -883,21 +890,32 @@ func ParseChainIndex(s string) (ci ChainIndex, err error) {
 }
 
 // String implements fmt.Stringer.
-func (s Specifier) String() string { return string(bytes.Trim(s[:], "\x00")) }
+func (s Specifier) String() string {
+	b := string(bytes.TrimRight(s[:], "\x00"))
+	for _, c := range b {
+		if !(('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || ('0' <= c && c <= '9')) {
+			return strconv.Quote(b)
+		}
+	}
+	return b
+}
 
 // MarshalText implements encoding.TextMarshaler.
 func (s Specifier) MarshalText() ([]byte, error) { return []byte(s.String()), nil }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (s *Specifier) UnmarshalText(b []byte) error {
-	str, err := strconv.Unquote(string(b))
-	if err != nil {
-		str = string(b)
+	if len(b) > 0 && b[0] == '"' {
+		uq, err := strconv.Unquote(string(b))
+		if err != nil {
+			return err
+		}
+		b = []byte(uq)
 	}
-	if len(str) > len(s) {
-		return fmt.Errorf("specifier %s too long", str)
+	if len(b) > len(s) {
+		return fmt.Errorf("specifier %v too long (%v > 16)", b, len(b))
 	}
-	copy(s[:], str)
+	copy(s[:], b)
 	return nil
 }
 
@@ -908,12 +926,11 @@ func (uk UnlockKey) MarshalText() ([]byte, error) {
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (uk *UnlockKey) UnmarshalText(b []byte) error {
-	parts := bytes.Split(b, []byte(":"))
-	if len(parts) != 2 {
-		return errors.New("decoding <algorithm>:<key> failed: wrong number of separators")
-	} else if err := uk.Algorithm.UnmarshalText(parts[0]); err != nil {
+	if i := bytes.LastIndexByte(b, ':'); i < 0 {
+		return errors.New("decoding <algorithm>:<key> failed: no separator")
+	} else if err := uk.Algorithm.UnmarshalText(b[:i]); err != nil {
 		return fmt.Errorf("decoding <algorithm>:<key> failed: %w", err)
-	} else if uk.Key, err = hex.DecodeString(string(parts[1])); err != nil {
+	} else if uk.Key, err = hex.DecodeString(string(b[i+1:])); err != nil {
 		return fmt.Errorf("decoding <algorithm>:<key> failed: %w", err)
 	}
 	return nil
