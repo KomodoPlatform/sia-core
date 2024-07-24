@@ -18,6 +18,13 @@ import (
 )
 
 const (
+	v2ResolutionRenewal      = "renewal"
+	v2ResolutionStorageProof = "storageProof"
+	v2ResolutionFinalization = "finalization"
+	v2ResolutionExpiration   = "expiration"
+)
+
+const (
 	// MaxRevisionNumber is used to finalize a FileContract. When a contract's
 	// RevisionNumber is set to this value, no further revisions are possible.
 	MaxRevisionNumber = math.MaxUint64
@@ -1034,6 +1041,45 @@ func (sig Signature) MarshalText() ([]byte, error) { return marshalHex("sig", si
 func (sig *Signature) UnmarshalText(b []byte) error { return unmarshalHex(sig[:], "sig", b) }
 
 // MarshalJSON implements json.Marshaler.
+func (fcr FileContractRevision) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ParentID         FileContractID   `json:"parentID"`
+		UnlockConditions UnlockConditions `json:"unlockConditions"`
+		Filesize         uint64           `json:"filesize"`
+		FileMerkleRoot   Hash256          `json:"fileMerkleRoot"`
+		WindowStart      uint64           `json:"windowStart"`
+		WindowEnd        uint64           `json:"windowEnd"`
+		// Payout omitted; see FileContractRevision docstring
+		ValidProofOutputs  []SiacoinOutput `json:"validProofOutputs"`
+		MissedProofOutputs []SiacoinOutput `json:"missedProofOutputs"`
+		UnlockHash         Hash256         `json:"unlockHash"`
+		RevisionNumber     uint64          `json:"revisionNumber"`
+	}{
+		fcr.ParentID,
+		fcr.UnlockConditions,
+		fcr.Filesize,
+		fcr.FileMerkleRoot,
+		fcr.WindowStart,
+		fcr.WindowEnd,
+		fcr.ValidProofOutputs,
+		fcr.MissedProofOutputs,
+		fcr.UnlockHash,
+		fcr.RevisionNumber,
+	})
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (fcr *FileContractRevision) UnmarshalJSON(b []byte) error {
+	type alias FileContractRevision
+	if err := json.Unmarshal(b, (*alias)(fcr)); err != nil {
+		return err
+	}
+	// see FileContractRevision docstring
+	fcr.Payout = NewCurrency(math.MaxUint64, math.MaxUint64)
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
 func (sp StorageProof) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		ParentID FileContractID `json:"parentID"`
@@ -1092,13 +1138,13 @@ func (res V2FileContractResolution) MarshalJSON() ([]byte, error) {
 	var typ string
 	switch res.Resolution.(type) {
 	case *V2FileContractRenewal:
-		typ = "renewal"
+		typ = v2ResolutionRenewal
 	case *V2StorageProof:
-		typ = "storageProof"
+		typ = v2ResolutionStorageProof
 	case *V2FileContractFinalization:
-		typ = "finalization"
+		typ = v2ResolutionFinalization
 	case *V2FileContractExpiration:
-		typ = "expiration"
+		typ = v2ResolutionExpiration
 	default:
 		panic(fmt.Sprintf("unhandled file contract resolution type %T", res.Resolution))
 	}
@@ -1120,13 +1166,13 @@ func (res *V2FileContractResolution) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	switch p.Type {
-	case "renewal":
+	case v2ResolutionRenewal:
 		res.Resolution = new(V2FileContractRenewal)
-	case "storageProof":
+	case v2ResolutionStorageProof:
 		res.Resolution = new(V2StorageProof)
-	case "finalization":
+	case v2ResolutionFinalization:
 		res.Resolution = new(V2FileContractFinalization)
-	case "expiration":
+	case v2ResolutionExpiration:
 		res.Resolution = new(V2FileContractExpiration)
 	default:
 		return fmt.Errorf("unknown file contract resolution type %q", p.Type)
