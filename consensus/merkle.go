@@ -282,7 +282,10 @@ func updateLeaves(leaves []elementLeaf) [64][]elementLeaf {
 	var recompute func(i, j uint64, leaves []elementLeaf) types.Hash256
 	recompute = func(i, j uint64, leaves []elementLeaf) types.Hash256 {
 		height := bits.TrailingZeros64(j - i) // equivalent to log2(j-i), as j-i is always a power of two
-		if len(leaves) == 1 && height == 0 {
+		if height == 0 {
+			if len(leaves) > 1 {
+				panic("consensus: multiple leaves with same accumulator index")
+			}
 			return leaves[0].hash()
 		}
 		mid := (i + j) / 2
@@ -360,8 +363,7 @@ func (acc *ElementAccumulator) applyBlock(updated, added []elementLeaf) (eau ele
 
 // revertBlock modifies the proofs of supplied elements such that they validate
 // under acc, which must be the accumulator prior to the application of those
-// elements. All of the elements will be marked unspent. The accumulator itself
-// is not modified.
+// elements. The accumulator itself is not modified.
 func (acc *ElementAccumulator) revertBlock(updated, added []elementLeaf) (eru elementRevertUpdate) {
 	eru.updated = updateLeaves(updated)
 	eru.numLeaves = acc.NumLeaves
