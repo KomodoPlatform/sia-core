@@ -44,7 +44,7 @@ func storageProofRoot(leafHash types.Hash256, leafIndex uint64, filesize uint64,
 	}
 	root := proofRoot(leafHash, leafIndex, proof[:subtreeHeight])
 	for _, h := range proof[subtreeHeight:] {
-		root = blake2b.SumPair(root, h)
+		root = blake2b.SumPair(h, root)
 	}
 	return root
 }
@@ -52,17 +52,17 @@ func storageProofRoot(leafHash types.Hash256, leafIndex uint64, filesize uint64,
 // An elementLeaf represents a leaf in the ElementAccumulator Merkle tree.
 type elementLeaf struct {
 	*types.StateElement
-	ElementHash types.Hash256
-	Spent       bool
+	elementHash types.Hash256
+	spent       bool
 }
 
 // hash returns the leaf's hash, for direct use in the Merkle tree.
 func (l elementLeaf) hash() types.Hash256 {
 	buf := make([]byte, 1+32+8+1)
 	buf[0] = leafHashPrefix
-	copy(buf[1:], l.ElementHash[:])
+	copy(buf[1:], l.elementHash[:])
 	binary.LittleEndian.PutUint64(buf[33:], l.LeafIndex)
-	if l.Spent {
+	if l.spent {
 		buf[41] = 1
 	}
 	return types.HashBytes(buf)
@@ -199,6 +199,10 @@ func (acc *ElementAccumulator) containsSpentSiafundElement(sfe types.SiafundElem
 	return acc.containsLeaf(siafundLeaf(&sfe, true))
 }
 
+func (acc *ElementAccumulator) containsUnresolvedFileContractElement(fce types.FileContractElement) bool {
+	return acc.containsLeaf(fileContractLeaf(&fce, false))
+}
+
 func (acc *ElementAccumulator) containsUnresolvedV2FileContractElement(fce types.V2FileContractElement) bool {
 	return acc.containsLeaf(v2FileContractLeaf(&fce, false))
 }
@@ -278,7 +282,10 @@ func updateLeaves(leaves []elementLeaf) [64][]elementLeaf {
 	var recompute func(i, j uint64, leaves []elementLeaf) types.Hash256
 	recompute = func(i, j uint64, leaves []elementLeaf) types.Hash256 {
 		height := bits.TrailingZeros64(j - i) // equivalent to log2(j-i), as j-i is always a power of two
-		if len(leaves) == 1 && height == 0 {
+		if height == 0 {
+			if len(leaves) > 1 {
+				panic("consensus: multiple leaves with same accumulator index")
+			}
 			return leaves[0].hash()
 		}
 		mid := (i + j) / 2
@@ -356,8 +363,7 @@ func (acc *ElementAccumulator) applyBlock(updated, added []elementLeaf) (eau ele
 
 // revertBlock modifies the proofs of supplied elements such that they validate
 // under acc, which must be the accumulator prior to the application of those
-// elements. All of the elements will be marked unspent. The accumulator itself
-// is not modified.
+// elements. The accumulator itself is not modified.
 func (acc *ElementAccumulator) revertBlock(updated, added []elementLeaf) (eru elementRevertUpdate) {
 	eru.updated = updateLeaves(updated)
 	eru.numLeaves = acc.NumLeaves
@@ -400,7 +406,7 @@ type elementApplyUpdate struct {
 }
 
 func (eau *elementApplyUpdate) updateElementProof(e *types.StateElement) {
-	if e.LeafIndex == types.EphemeralLeafIndex {
+	if e.LeafIndex == types.UnassignedLeafIndex {
 		panic("cannot update an ephemeral element")
 	} else if e.LeafIndex >= eau.oldNumLeaves {
 		return // newly-added element
@@ -417,7 +423,7 @@ type elementRevertUpdate struct {
 }
 
 func (eru *elementRevertUpdate) updateElementProof(e *types.StateElement) {
-	if e.LeafIndex == types.EphemeralLeafIndex {
+	if e.LeafIndex == types.UnassignedLeafIndex {
 		panic("cannot update an ephemeral element")
 	} else if e.LeafIndex >= eru.numLeaves {
 		panic("cannot update an element that is not present in the accumulator")

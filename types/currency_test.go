@@ -1,9 +1,13 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
+
+	"lukechampine.com/frand"
 )
 
 func mustParseCurrency(s string) Currency {
@@ -753,4 +757,66 @@ func TestParseCurrency(t *testing.T) {
 			t.Errorf("UnmarshalText(%v) = %d, want %d", tt.s, got, tt.want)
 		}
 	}
+}
+
+func TestUnmarshalHex(t *testing.T) {
+	for _, test := range []struct {
+		prefix string
+		data   string
+		dstLen int
+		err    string
+	}{
+		{"", strings.Repeat("0", 2), 1, ""},
+		{"", strings.Repeat("_", 2), 1, "decoding :<hex> failed: encoding/hex: invalid byte: U+005F '_'"},
+		{"ed25519", strings.Repeat("0", 62), 32, "decoding ed25519:<hex> failed: unexpected EOF"},
+		{"ed25519", strings.Repeat("0", 63), 32, "decoding ed25519:<hex> failed: encoding/hex: odd length hex string"},
+		{"ed25519", strings.Repeat("0", 64), 32, ""},
+		{"ed25519", strings.Repeat("0", 65), 32, "decoding ed25519:<hex> failed: input too long"},
+	} {
+		dst := make([]byte, test.dstLen)
+		err := unmarshalHex(dst, test.prefix, []byte(test.data))
+		if err == nil {
+			if test.err != "" {
+				t.Errorf("unmarshalHex(%s, %s) expected error %q, got nil", test.prefix, test.data, test.err)
+			}
+		} else {
+			if err.Error() != test.err {
+				t.Errorf("unmarshalHex(%s, %s) expected error %q, got %q", test.prefix, test.data, test.err, err)
+			}
+		}
+	}
+}
+
+func BenchmarkDecodeSlice(b *testing.B) {
+	s := make([]V2FileContract, 10000)
+
+	var buf bytes.Buffer
+	e := NewEncoder(&buf)
+	EncodeSlice(e, s)
+	e.Flush()
+	enc := buf.Bytes()
+	frand.Read(enc[8:])
+
+	b.ReportAllocs()
+	b.Run("std", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			d := NewBufDecoder(enc)
+			s2 := make([]V2FileContract, d.ReadUint64())
+			for i := range s2 {
+				s2[i].DecodeFrom(d)
+			}
+			if d.Err() != nil {
+				b.Fatal(d.Err())
+			}
+		}
+	})
+	b.Run("slice", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			d := NewBufDecoder(enc)
+			DecodeSlice(d, new([]V2FileContract))
+			if d.Err() != nil {
+				b.Fatal(d.Err())
+			}
+		}
+	})
 }

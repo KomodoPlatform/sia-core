@@ -37,11 +37,15 @@ func multiproofTxns(numTxns int, numElems int) []types.V2Transaction {
 	// apply the block and extract the created elements
 	cs, cau := consensus.ApplyBlock(cs, b, consensus.V1BlockSupplement{}, time.Time{})
 	var sces []types.SiacoinElement
-	cau.ForEachSiacoinElement(func(sce types.SiacoinElement, spent bool) { sces = append(sces, sce) })
+	cau.ForEachSiacoinElement(func(sce types.SiacoinElement, created, spent bool) {
+		sces = append(sces, sce)
+	})
 	var sfes []types.SiafundElement
-	cau.ForEachSiafundElement(func(sfe types.SiafundElement, spent bool) { sfes = append(sfes, sfe) })
+	cau.ForEachSiafundElement(func(sfe types.SiafundElement, created, spent bool) {
+		sfes = append(sfes, sfe)
+	})
 	var fces []types.V2FileContractElement
-	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+	cau.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		fces = append(fces, fce)
 	})
 	// select randomly
@@ -84,7 +88,7 @@ func multiproofTxns(numTxns int, numElems int) []types.V2Transaction {
 	for i := range txns {
 		for j := range txns[i].SiacoinInputs {
 			if (n+1)%5 == 0 {
-				txns[i].SiacoinInputs[j].Parent.LeafIndex = types.EphemeralLeafIndex
+				txns[i].SiacoinInputs[j].Parent.LeafIndex = types.UnassignedLeafIndex
 				txns[i].SiacoinInputs[j].Parent.MerkleProof = nil
 			}
 			n++
@@ -129,10 +133,7 @@ func (b uncompressedBlock) EncodeTo(e *types.Encoder) {
 	if b.V2 != nil {
 		e.WriteUint64(b.V2.Height)
 		b.V2.Commitment.EncodeTo(e)
-		e.WritePrefix(len(b.V2.Transactions))
-		for i := range b.V2.Transactions {
-			b.V2.Transactions[i].EncodeTo(e)
-		}
+		types.EncodeSlice(e, b.V2.Transactions)
 	}
 }
 

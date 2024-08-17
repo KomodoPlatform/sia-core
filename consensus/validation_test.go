@@ -5,10 +5,13 @@ import (
 	"errors"
 	"math"
 	"math/bits"
+	"strings"
 	"testing"
 	"time"
 
+	"go.sia.tech/core/internal/blake2b"
 	"go.sia.tech/core/types"
+	"lukechampine.com/frand"
 )
 
 func testnet() (*Network, types.Block) {
@@ -43,25 +46,40 @@ type consensusDB struct {
 }
 
 func (db *consensusDB) applyBlock(au ApplyUpdate) {
-	au.ForEachSiacoinElement(func(sce types.SiacoinElement, spent bool) {
+	for id, sce := range db.sces {
+		au.UpdateElementProof(&sce.StateElement)
+		db.sces[id] = sce
+	}
+	for id, sfe := range db.sfes {
+		au.UpdateElementProof(&sfe.StateElement)
+		db.sfes[id] = sfe
+	}
+	for id, fce := range db.fces {
+		au.UpdateElementProof(&fce.StateElement)
+		db.fces[id] = fce
+	}
+	au.ForEachSiacoinElement(func(sce types.SiacoinElement, created, spent bool) {
 		if spent {
 			delete(db.sces, types.SiacoinOutputID(sce.ID))
 		} else {
 			db.sces[types.SiacoinOutputID(sce.ID)] = sce
 		}
 	})
-	au.ForEachSiafundElement(func(sfe types.SiafundElement, spent bool) {
+	au.ForEachSiafundElement(func(sfe types.SiafundElement, created, spent bool) {
 		if spent {
 			delete(db.sfes, types.SiafundOutputID(sfe.ID))
 		} else {
 			db.sfes[types.SiafundOutputID(sfe.ID)] = sfe
 		}
 	})
-	au.ForEachFileContractElement(func(fce types.FileContractElement, rev *types.FileContractElement, resolved, valid bool) {
+	au.ForEachFileContractElement(func(fce types.FileContractElement, created bool, rev *types.FileContractElement, resolved, valid bool) {
 		if resolved {
 			delete(db.fces, types.FileContractID(fce.ID))
 		} else {
 			db.fces[types.FileContractID(fce.ID)] = fce
+			if rev != nil {
+				db.fces[types.FileContractID(rev.ID)] = *rev
+			}
 		}
 	})
 }
@@ -91,7 +109,7 @@ func (db *consensusDB) supplementTipBlock(b types.Block) (bs V1BlockSupplement) 
 	return bs
 }
 
-func (db *consensusDB) ancestorTimestamp(id types.BlockID) time.Time {
+func (db *consensusDB) ancestorTimestamp(types.BlockID) time.Time {
 	return time.Time{}
 }
 
@@ -406,14 +424,14 @@ func TestValidateBlock(t *testing.T) {
 				"siafund outputs exceed inputs",
 				func(b *types.Block) {
 					txn := &b.Transactions[0]
-					txn.SiafundOutputs[0].Value = txn.SiafundOutputs[0].Value + 1
+					txn.SiafundOutputs[0].Value++
 				},
 			},
 			{
 				"siafund outputs less than inputs",
 				func(b *types.Block) {
 					txn := &b.Transactions[0]
-					txn.SiafundOutputs[0].Value = txn.SiafundOutputs[0].Value - 1
+					txn.SiafundOutputs[0].Value--
 				},
 			},
 			{
@@ -588,7 +606,7 @@ func TestValidateBlock(t *testing.T) {
 				func(b *types.Block) {
 					txn := &b.Transactions[0]
 					txn.SiafundInputs = append(txn.SiafundInputs, txn.SiafundInputs[0])
-					txn.SiafundOutputs[0].Value = txn.SiafundOutputs[0].Value + 100
+					txn.SiafundOutputs[0].Value += 100
 				},
 			},
 			{
@@ -685,7 +703,7 @@ func TestValidateBlock(t *testing.T) {
 	}
 }
 
-func updateProofs(au ApplyUpdate, sces []types.SiacoinElement, sfes []types.SiafundElement, fces []types.V2FileContractElement) {
+func updateProofs(au ApplyUpdate, sces []types.SiacoinElement, sfes []types.SiafundElement, fces []types.V2FileContractElement, cies []types.ChainIndexElement) {
 	for i := range sces {
 		au.UpdateElementProof(&sces[i].StateElement)
 	}
@@ -694,6 +712,9 @@ func updateProofs(au ApplyUpdate, sces []types.SiacoinElement, sfes []types.Siaf
 	}
 	for i := range fces {
 		au.UpdateElementProof(&fces[i].StateElement)
+	}
+	for i := range cies {
+		au.UpdateElementProof(&cies[i].StateElement)
 	}
 }
 
@@ -747,8 +768,11 @@ func TestValidateV2Block(t *testing.T) {
 	giftAmountSC := types.Siacoins(100)
 	giftAmountSF := uint64(100)
 	v1GiftFC := prepareContractFormation(renterPublicKey, hostPublicKey, types.Siacoins(1), types.Siacoins(1), 100, 100, types.VoidAddress)
+	v1GiftFC.Filesize = 65
+	v1GiftFC.FileMerkleRoot = blake2b.SumPair((State{}).StorageProofLeafHash([]byte{1}), (State{}).StorageProofLeafHash([]byte{2}))
 	v2GiftFC := types.V2FileContract{
 		Filesize:         v1GiftFC.Filesize,
+		FileMerkleRoot:   v1GiftFC.FileMerkleRoot,
 		ProofHeight:      20,
 		ExpirationHeight: 30,
 		RenterOutput:     v1GiftFC.ValidProofOutputs[0],
@@ -778,15 +802,15 @@ func TestValidateV2Block(t *testing.T) {
 
 	_, au := ApplyBlock(n.GenesisState(), genesisBlock, V1BlockSupplement{}, time.Time{})
 	var sces []types.SiacoinElement
-	au.ForEachSiacoinElement(func(sce types.SiacoinElement, spent bool) {
+	au.ForEachSiacoinElement(func(sce types.SiacoinElement, created, spent bool) {
 		sces = append(sces, sce)
 	})
 	var sfes []types.SiafundElement
-	au.ForEachSiafundElement(func(sfe types.SiafundElement, spent bool) {
+	au.ForEachSiafundElement(func(sfe types.SiafundElement, created, spent bool) {
 		sfes = append(sfes, sfe)
 	})
 	var fces []types.V2FileContractElement
-	au.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+	au.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		fces = append(fces, fce)
 	})
 	var cies []types.ChainIndexElement
@@ -959,14 +983,14 @@ func TestValidateV2Block(t *testing.T) {
 				"siafund outputs exceed inputs",
 				func(b *types.Block) {
 					txn := &b.V2.Transactions[0]
-					txn.SiafundOutputs[0].Value = txn.SiafundOutputs[0].Value + 1
+					txn.SiafundOutputs[0].Value++
 				},
 			},
 			{
 				"siafund outputs less than inputs",
 				func(b *types.Block) {
 					txn := &b.V2.Transactions[0]
-					txn.SiafundOutputs[0].Value = txn.SiafundOutputs[0].Value - 1
+					txn.SiafundOutputs[0].Value--
 				},
 			},
 			{
@@ -1165,18 +1189,18 @@ func TestValidateV2Block(t *testing.T) {
 
 	cs, testAU := ApplyBlock(cs, validBlock, db.supplementTipBlock(validBlock), time.Now())
 	db.applyBlock(testAU)
-	updateProofs(testAU, sces, sfes, fces)
+	updateProofs(testAU, sces, sfes, fces, cies)
 
 	var testSces []types.SiacoinElement
-	testAU.ForEachSiacoinElement(func(sce types.SiacoinElement, spent bool) {
+	testAU.ForEachSiacoinElement(func(sce types.SiacoinElement, created, spent bool) {
 		testSces = append(testSces, sce)
 	})
 	var testSfes []types.SiafundElement
-	testAU.ForEachSiafundElement(func(sfe types.SiafundElement, spent bool) {
+	testAU.ForEachSiafundElement(func(sfe types.SiafundElement, created, spent bool) {
 		testSfes = append(testSfes, sfe)
 	})
 	var testFces []types.V2FileContractElement
-	testAU.ForEachV2FileContractElement(func(fce types.V2FileContractElement, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
+	testAU.ForEachV2FileContractElement(func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType) {
 		testFces = append(testFces, fce)
 	})
 	cies = append(cies, testAU.ChainIndexElement())
@@ -1203,8 +1227,8 @@ func TestValidateV2Block(t *testing.T) {
 		}
 		cs, au = ApplyBlock(cs, b, db.supplementTipBlock(validBlock), time.Now())
 		db.applyBlock(au)
-		updateProofs(au, sces, sfes, fces)
-		updateProofs(au, testSces, testSfes, testFces)
+		updateProofs(au, sces, sfes, fces, cies)
+		updateProofs(au, testSces, testSfes, testFces, nil)
 		cies = append(cies, au.ChainIndexElement())
 
 		blockID = b.ID()
@@ -1216,7 +1240,16 @@ func TestValidateV2Block(t *testing.T) {
 		V2: &types.V2BlockData{
 			Height: cs.Index.Height + 1,
 			Transactions: []types.V2Transaction{
-				{},
+				{
+					FileContractResolutions: []types.V2FileContractResolution{{
+						Parent: testFces[0],
+						Resolution: &types.V2StorageProof{
+							ProofIndex: cies[len(cies)-2],
+							Leaf:       [64]byte{1},
+							Proof:      []types.Hash256{cs.StorageProofLeafHash([]byte{2})},
+						},
+					}},
+				},
 			},
 		},
 		MinerPayouts: []types.SiacoinOutput{{
@@ -1224,6 +1257,14 @@ func TestValidateV2Block(t *testing.T) {
 			Value:   cs.BlockReward(),
 		}},
 	}
+	if cs.StorageProofLeafIndex(testFces[0].V2FileContract.Filesize, cies[len(cies)-2].ChainIndex.ID, types.FileContractID(testFces[0].ID)) == 1 {
+		b.V2.Transactions[0].FileContractResolutions[0].Resolution = &types.V2StorageProof{
+			ProofIndex: cies[len(cies)-2],
+			Leaf:       [64]byte{2},
+			Proof:      []types.Hash256{cs.StorageProofLeafHash([]byte{1})},
+		}
+	}
+
 	signTxn(cs, &b.V2.Transactions[0])
 	b.V2.Commitment = cs.Commitment(cs.TransactionsCommitment(b.Transactions, b.V2Transactions()), b.MinerPayouts[0].Address)
 	findBlockNonce(cs, &validBlock)
@@ -1401,11 +1442,153 @@ func TestValidateV2Block(t *testing.T) {
 	}
 }
 
+func TestV2ImmatureSiacoinOutput(t *testing.T) {
+	n, genesisBlock := testnet()
+	n.HardforkV2.AllowHeight = 1
+
+	db, cs := newConsensusDB(n, genesisBlock)
+
+	pk := types.NewPrivateKeyFromSeed(frand.Bytes(32))
+	sp := types.PolicyPublicKey(pk.PublicKey())
+	addr := sp.Address()
+
+	utxos := make(map[types.SiacoinOutputID]types.SiacoinElement)
+	mineBlock := func(minerAddr types.Address, v2Txns []types.V2Transaction) error {
+		t.Helper()
+		b := types.Block{
+			ParentID:  cs.Index.ID,
+			Timestamp: time.Now(),
+			MinerPayouts: []types.SiacoinOutput{
+				{Address: minerAddr, Value: cs.BlockReward()},
+			},
+		}
+		if cs.Index.Height >= n.HardforkV2.AllowHeight {
+			b.V2 = &types.V2BlockData{
+				Height:       cs.Index.Height + 1,
+				Transactions: v2Txns,
+			}
+			b.V2.Commitment = cs.Commitment(cs.TransactionsCommitment(b.Transactions, b.V2Transactions()), minerAddr)
+		}
+
+		findBlockNonce(cs, &b)
+		if err := ValidateBlock(cs, b, db.supplementTipBlock(b)); err != nil {
+			return err
+		}
+
+		var cau ApplyUpdate
+		cs, cau = ApplyBlock(cs, b, db.supplementTipBlock(b), db.ancestorTimestamp(b.ParentID))
+		cau.ForEachSiacoinElement(func(sce types.SiacoinElement, created, spent bool) {
+			if spent {
+				delete(utxos, types.SiacoinOutputID(sce.ID))
+			} else if sce.SiacoinOutput.Address == addr {
+				utxos[types.SiacoinOutputID(sce.ID)] = sce
+			}
+		})
+
+		for id, sce := range utxos {
+			cau.UpdateElementProof(&sce.StateElement)
+			utxos[id] = sce
+		}
+
+		db.applyBlock(cau)
+		return nil
+	}
+
+	if err := mineBlock(addr, nil); err != nil {
+		t.Fatal(err)
+	} else if cs.Index.Height != 1 {
+		t.Fatalf("expected height %v, got %v", 1, cs.Index.Height)
+	} else if len(utxos) != 1 {
+		t.Fatalf("expected %v utxos, got %v", 1, len(utxos))
+	}
+
+	// grab the one element
+	var sce types.SiacoinElement
+	for _, sce = range utxos {
+		break
+	}
+
+	// construct a transaction using the immature miner payout utxo
+	txn := types.V2Transaction{
+		SiacoinInputs: []types.V2SiacoinInput{
+			{
+				Parent: sce,
+			},
+		},
+		SiacoinOutputs: []types.SiacoinOutput{
+			{Address: types.VoidAddress, Value: sce.SiacoinOutput.Value},
+		},
+	}
+	sigHash := cs.InputSigHash(txn)
+	txn.SiacoinInputs[0].SatisfiedPolicy = types.SatisfiedPolicy{
+		Policy:     sp,
+		Signatures: []types.Signature{pk.SignHash(sigHash)},
+	}
+
+	// check for immature payout error
+	if err := mineBlock(types.VoidAddress, []types.V2Transaction{txn}); !strings.Contains(err.Error(), "has immature parent") {
+		t.Fatalf("expected immature output err, got %v", err)
+	}
+}
+
 func TestEarlyV2Transaction(t *testing.T) {
 	n := &Network{InitialTarget: types.BlockID{0xFF}}
 	n.HardforkV2.AllowHeight = 1
 	exp := errors.New("v2 transactions are not allowed until v2 hardfork begins")
 	if err := ValidateV2Transaction(NewMidState(n.GenesisState()), types.V2Transaction{}); err == nil || err.Error() != exp.Error() {
 		t.Fatalf("expected %q, got %q", exp, err)
+	}
+}
+
+func TestWindowRevision(t *testing.T) {
+	n, genesisBlock := testnet()
+	n.InitialTarget = types.BlockID{0xFF}
+
+	// create file contract with window that is already open
+	sk := types.NewPrivateKeyFromSeed(make([]byte, 32))
+	uc := types.StandardUnlockConditions(sk.PublicKey())
+	fc := types.FileContract{
+		WindowStart: 0,
+		WindowEnd:   3,
+		UnlockHash:  types.Hash256(uc.UnlockHash()),
+	}
+	genesisBlock.Transactions = []types.Transaction{{
+		FileContracts: []types.FileContract{fc},
+	}}
+	db, cs := newConsensusDB(n, genesisBlock)
+
+	// attempt to extend the window
+	rev := fc
+	rev.WindowStart = 1
+	rev.RevisionNumber++
+	txn := types.Transaction{
+		FileContractRevisions: []types.FileContractRevision{{
+			ParentID:         genesisBlock.Transactions[0].FileContractID(0),
+			UnlockConditions: uc,
+			FileContract:     rev,
+		}},
+		Signatures: []types.TransactionSignature{{
+			ParentID:       types.Hash256(genesisBlock.Transactions[0].FileContractID(0)),
+			PublicKeyIndex: 0,
+			Timelock:       0,
+			CoveredFields:  types.CoveredFields{WholeTransaction: true},
+		}},
+	}
+	sig := sk.SignHash(cs.WholeSigHash(txn, txn.Signatures[0].ParentID, 0, 0, nil))
+	txn.Signatures[0].Signature = sig[:]
+
+	b := types.Block{
+		ParentID:  genesisBlock.ID(),
+		Timestamp: types.CurrentTimestamp(),
+		MinerPayouts: []types.SiacoinOutput{{
+			Address: types.VoidAddress,
+			Value:   cs.BlockReward(),
+		}},
+		Transactions: []types.Transaction{txn},
+	}
+
+	findBlockNonce(cs, &b)
+	if err := ValidateBlock(cs, b, db.supplementTipBlock(b)); err == nil || !strings.Contains(err.Error(), "proof window has opened") {
+		t.Fatal("expected error when extending window")
 	}
 }

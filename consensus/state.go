@@ -191,9 +191,36 @@ func (s State) medianTimestamp() time.Time {
 	return l.Add(r.Sub(l) / 2)
 }
 
-// MaxFutureTimestamp returns the maximum allowed timestamp for a block.
+// MaxFutureTimestamp returns a reasonable maximum value for a child block's
+// timestamp. Note that this is not a consensus rule.
 func (s State) MaxFutureTimestamp(currentTime time.Time) time.Time {
 	return currentTime.Add(3 * time.Hour)
+}
+
+// SufficientlyHeavierThan returns whether s is sufficiently heavier than t.
+// Nodes should use this method rather than directly comparing the Depth or
+// TotalWork fields. Note that this is not a consensus rule.
+func (s State) SufficientlyHeavierThan(t State) bool {
+	// The need for a "sufficiently heavier" threshold arises from Sia's use of
+	// a per-block difficulty adjustment algorithm. Imagine you are a miner who
+	// has just found a block. Unfortunately, another miner also found a block,
+	// and they broadcast theirs first. Normally, you would just eat the loss
+	// and switch to mining on their chain. This time, however, you notice that
+	// their block's timestamp is slightly later than yours. That means that the
+	// difficulty of their *next* block will be slightly lower than it would be
+	// for your block. So if you both mine one additional block, your chain will
+	// have more total work than theirs! Thus, the most rational thing to do is
+	// to keep mining on your own chain. Even better, you don't have to directly
+	// compete with other miners, because you haven't broadcast your block yet.
+	//
+	// There's a term for this: selfish mining. And it's not something we want
+	// to encourage! To prevent it, we require that a competing chain have
+	// substantially more work than the current chain before we reorg to it,
+	// where "substantially" means at least 20% of the current difficulty.
+	// That's high enough that you can't get there by merely manipulating
+	// timestamps, but low enough that an entire additional block will
+	// definitely qualify.
+	return s.TotalWork.Cmp(t.TotalWork.add(t.Difficulty.div64(5))) > 0
 }
 
 // BlockInterval is the expected wall clock time between consecutive blocks.
@@ -370,11 +397,12 @@ func (s State) StorageProofLeafIndex(filesize uint64, windowID types.BlockID, fc
 // StorageProofLeafHash computes the leaf hash of file contract data. If
 // len(leaf) < 64, it will be extended with zeros.
 func (s State) StorageProofLeafHash(leaf []byte) types.Hash256 {
-	const leafSize = len(types.StorageProof{}.Leaf)
-	buf := make([]byte, 1+leafSize)
-	buf[0] = leafHashPrefix
-	copy(buf[1:], leaf)
-	return types.HashBytes(buf)
+	if len(leaf) == 64 {
+		return blake2b.SumLeaf((*[64]byte)(leaf))
+	}
+	var buf [64]byte
+	copy(buf[:], leaf)
+	return blake2b.SumLeaf(&buf)
 }
 
 // replayPrefix returns the replay protection prefix at the current height.
@@ -407,41 +435,41 @@ func (s State) WholeSigHash(txn types.Transaction, parentID types.Hash256, pubke
 	defer hasherPool.Put(h)
 	h.Reset()
 
-	h.E.WritePrefix(len((txn.SiacoinInputs)))
+	h.E.WriteUint64(uint64(len((txn.SiacoinInputs))))
 	for i := range txn.SiacoinInputs {
 		h.E.Write(s.replayPrefix())
 		txn.SiacoinInputs[i].EncodeTo(h.E)
 	}
-	h.E.WritePrefix(len((txn.SiacoinOutputs)))
+	h.E.WriteUint64(uint64(len((txn.SiacoinOutputs))))
 	for i := range txn.SiacoinOutputs {
 		types.V1SiacoinOutput(txn.SiacoinOutputs[i]).EncodeTo(h.E)
 	}
-	h.E.WritePrefix(len((txn.FileContracts)))
+	h.E.WriteUint64(uint64(len((txn.FileContracts))))
 	for i := range txn.FileContracts {
 		txn.FileContracts[i].EncodeTo(h.E)
 	}
-	h.E.WritePrefix(len((txn.FileContractRevisions)))
+	h.E.WriteUint64(uint64(len((txn.FileContractRevisions))))
 	for i := range txn.FileContractRevisions {
 		txn.FileContractRevisions[i].EncodeTo(h.E)
 	}
-	h.E.WritePrefix(len((txn.StorageProofs)))
+	h.E.WriteUint64(uint64(len((txn.StorageProofs))))
 	for i := range txn.StorageProofs {
 		txn.StorageProofs[i].EncodeTo(h.E)
 	}
-	h.E.WritePrefix(len((txn.SiafundInputs)))
+	h.E.WriteUint64(uint64(len((txn.SiafundInputs))))
 	for i := range txn.SiafundInputs {
 		h.E.Write(s.replayPrefix())
 		txn.SiafundInputs[i].EncodeTo(h.E)
 	}
-	h.E.WritePrefix(len((txn.SiafundOutputs)))
+	h.E.WriteUint64(uint64(len((txn.SiafundOutputs))))
 	for i := range txn.SiafundOutputs {
 		types.V1SiafundOutput(txn.SiafundOutputs[i]).EncodeTo(h.E)
 	}
-	h.E.WritePrefix(len((txn.MinerFees)))
+	h.E.WriteUint64(uint64(len((txn.MinerFees))))
 	for i := range txn.MinerFees {
 		types.V1Currency(txn.MinerFees[i]).EncodeTo(h.E)
 	}
-	h.E.WritePrefix(len((txn.ArbitraryData)))
+	h.E.WriteUint64(uint64(len((txn.ArbitraryData))))
 	for i := range txn.ArbitraryData {
 		h.E.WriteBytes(txn.ArbitraryData[i])
 	}
@@ -558,7 +586,7 @@ func (s State) AttestationSigHash(a types.Attestation) types.Hash256 {
 // A MidState represents the state of the chain within a block.
 type MidState struct {
 	base               State
-	ephemeral          map[types.Hash256]int // indices into element slices
+	created            map[types.Hash256]int // indices into element slices
 	spends             map[types.Hash256]types.TransactionID
 	revs               map[types.Hash256]*types.FileContractElement
 	res                map[types.Hash256]bool
@@ -568,7 +596,7 @@ type MidState struct {
 	foundationPrimary  types.Address
 	foundationFailsafe types.Address
 
-	// elements updated/added by block
+	// elements created/updated by block
 	sces   []types.SiacoinElement
 	sfes   []types.SiafundElement
 	fces   []types.FileContractElement
@@ -578,21 +606,21 @@ type MidState struct {
 }
 
 func (ms *MidState) siacoinElement(ts V1TransactionSupplement, id types.SiacoinOutputID) (types.SiacoinElement, bool) {
-	if i, ok := ms.ephemeral[types.Hash256(id)]; ok {
+	if i, ok := ms.created[types.Hash256(id)]; ok {
 		return ms.sces[i], true
 	}
 	return ts.siacoinElement(id)
 }
 
 func (ms *MidState) siafundElement(ts V1TransactionSupplement, id types.SiafundOutputID) (types.SiafundElement, bool) {
-	if i, ok := ms.ephemeral[types.Hash256(id)]; ok {
+	if i, ok := ms.created[types.Hash256(id)]; ok {
 		return ms.sfes[i], true
 	}
 	return ts.siafundElement(id)
 }
 
 func (ms *MidState) fileContractElement(ts V1TransactionSupplement, id types.FileContractID) (types.FileContractElement, bool) {
-	if i, ok := ms.ephemeral[types.Hash256(id)]; ok {
+	if i, ok := ms.created[types.Hash256(id)]; ok {
 		return ms.fces[i], true
 	}
 	return ts.fileContractElement(id)
@@ -632,11 +660,16 @@ func (ms *MidState) isSpent(id types.Hash256) bool {
 	return ok
 }
 
+func (ms *MidState) isCreated(id types.Hash256) bool {
+	_, ok := ms.created[id]
+	return ok || id == ms.cie.ID
+}
+
 // NewMidState constructs a MidState initialized to the provided base state.
 func NewMidState(s State) *MidState {
 	return &MidState{
 		base:               s,
-		ephemeral:          make(map[types.Hash256]int),
+		created:            make(map[types.Hash256]int),
 		spends:             make(map[types.Hash256]types.TransactionID),
 		revs:               make(map[types.Hash256]*types.FileContractElement),
 		res:                make(map[types.Hash256]bool),
@@ -665,42 +698,18 @@ type V1TransactionSupplement struct {
 
 // EncodeTo implements types.EncoderTo.
 func (ts V1TransactionSupplement) EncodeTo(e *types.Encoder) {
-	e.WritePrefix(len(ts.SiacoinInputs))
-	for i := range ts.SiacoinInputs {
-		ts.SiacoinInputs[i].EncodeTo(e)
-	}
-	e.WritePrefix(len(ts.SiafundInputs))
-	for i := range ts.SiafundInputs {
-		ts.SiafundInputs[i].EncodeTo(e)
-	}
-	e.WritePrefix(len(ts.RevisedFileContracts))
-	for i := range ts.RevisedFileContracts {
-		ts.RevisedFileContracts[i].EncodeTo(e)
-	}
-	e.WritePrefix(len(ts.ValidFileContracts))
-	for i := range ts.ValidFileContracts {
-		ts.ValidFileContracts[i].EncodeTo(e)
-	}
+	types.EncodeSlice(e, ts.SiacoinInputs)
+	types.EncodeSlice(e, ts.SiafundInputs)
+	types.EncodeSlice(e, ts.RevisedFileContracts)
+	types.EncodeSlice(e, ts.ValidFileContracts)
 }
 
 // DecodeFrom implements types.DecoderFrom.
 func (ts *V1TransactionSupplement) DecodeFrom(d *types.Decoder) {
-	ts.SiacoinInputs = make([]types.SiacoinElement, d.ReadPrefix())
-	for i := range ts.SiacoinInputs {
-		ts.SiacoinInputs[i].DecodeFrom(d)
-	}
-	ts.SiafundInputs = make([]types.SiafundElement, d.ReadPrefix())
-	for i := range ts.SiafundInputs {
-		ts.SiafundInputs[i].DecodeFrom(d)
-	}
-	ts.RevisedFileContracts = make([]types.FileContractElement, d.ReadPrefix())
-	for i := range ts.RevisedFileContracts {
-		ts.RevisedFileContracts[i].DecodeFrom(d)
-	}
-	ts.ValidFileContracts = make([]types.FileContractElement, d.ReadPrefix())
-	for i := range ts.ValidFileContracts {
-		ts.ValidFileContracts[i].DecodeFrom(d)
-	}
+	types.DecodeSlice(d, &ts.SiacoinInputs)
+	types.DecodeSlice(d, &ts.SiafundInputs)
+	types.DecodeSlice(d, &ts.RevisedFileContracts)
+	types.DecodeSlice(d, &ts.ValidFileContracts)
 }
 
 func (ts V1TransactionSupplement) siacoinElement(id types.SiacoinOutputID) (sce types.SiacoinElement, ok bool) {
@@ -712,7 +721,7 @@ func (ts V1TransactionSupplement) siacoinElement(id types.SiacoinOutputID) (sce 
 	return
 }
 
-func (ts V1TransactionSupplement) siafundElement(id types.SiafundOutputID) (sce types.SiafundElement, ok bool) {
+func (ts V1TransactionSupplement) siafundElement(id types.SiafundOutputID) (sfe types.SiafundElement, ok bool) {
 	for _, sfe := range ts.SiafundInputs {
 		if types.SiafundOutputID(sfe.ID) == id {
 			return sfe, true
@@ -721,7 +730,7 @@ func (ts V1TransactionSupplement) siafundElement(id types.SiafundOutputID) (sce 
 	return
 }
 
-func (ts V1TransactionSupplement) fileContractElement(id types.FileContractID) (sce types.FileContractElement, ok bool) {
+func (ts V1TransactionSupplement) fileContractElement(id types.FileContractID) (fce types.FileContractElement, ok bool) {
 	for _, fce := range ts.RevisedFileContracts {
 		if types.FileContractID(fce.ID) == id {
 			return fce, true
@@ -755,24 +764,12 @@ type V1BlockSupplement struct {
 
 // EncodeTo implements types.EncoderTo.
 func (bs V1BlockSupplement) EncodeTo(e *types.Encoder) {
-	e.WritePrefix(len(bs.Transactions))
-	for i := range bs.Transactions {
-		bs.Transactions[i].EncodeTo(e)
-	}
-	e.WritePrefix(len(bs.ExpiringFileContracts))
-	for i := range bs.ExpiringFileContracts {
-		bs.ExpiringFileContracts[i].EncodeTo(e)
-	}
+	types.EncodeSlice(e, bs.Transactions)
+	types.EncodeSlice(e, bs.ExpiringFileContracts)
 }
 
 // DecodeFrom implements types.DecoderFrom.
 func (bs *V1BlockSupplement) DecodeFrom(d *types.Decoder) {
-	bs.Transactions = make([]V1TransactionSupplement, d.ReadPrefix())
-	for i := range bs.Transactions {
-		bs.Transactions[i].DecodeFrom(d)
-	}
-	bs.ExpiringFileContracts = make([]types.FileContractElement, d.ReadPrefix())
-	for i := range bs.ExpiringFileContracts {
-		bs.ExpiringFileContracts[i].DecodeFrom(d)
-	}
+	types.DecodeSlice(d, &bs.Transactions)
+	types.DecodeSlice(d, &bs.ExpiringFileContracts)
 }

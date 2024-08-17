@@ -2,9 +2,13 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
+
+	"lukechampine.com/frand"
 )
 
 func roundtrip(from EncoderTo, to DecoderFrom) {
@@ -16,6 +20,14 @@ func roundtrip(from EncoderTo, to DecoderFrom) {
 	to.DecodeFrom(d)
 	if d.Err() != nil {
 		panic(d.Err())
+	}
+}
+
+func jsonRoundtrip(from json.Marshaler, to json.Unmarshaler) {
+	if js, err := from.MarshalJSON(); err != nil {
+		panic(err)
+	} else if err := to.UnmarshalJSON(js); err != nil {
+		panic(err)
 	}
 }
 
@@ -134,6 +146,16 @@ func TestPolicyVerify(t *testing.T) {
 			false,
 		},
 		{
+			"exceed threshold with keys",
+			PolicyThreshold(1, []SpendPolicy{
+				PolicyPublicKey(pk),
+				PolicyPublicKey(pk),
+			}),
+			11,
+			[]Signature{key.SignHash(sigHash), key.SignHash(sigHash)},
+			false,
+		},
+		{
 			"lower threshold, neither valid",
 			PolicyThreshold(1, []SpendPolicy{
 				PolicyOpaque(PolicyAbove(10)),
@@ -171,6 +193,15 @@ func TestPolicyVerify(t *testing.T) {
 			}},
 			1,
 			nil,
+			false,
+		},
+		{
+			"unlock conditions, superfluous signatures",
+			SpendPolicy{PolicyTypeUnlockConditions{
+				SignaturesRequired: 0,
+			}},
+			1,
+			[]Signature{key.SignHash(sigHash)},
 			false,
 		},
 		{
@@ -217,6 +248,16 @@ func TestPolicyVerify(t *testing.T) {
 			}},
 			1,
 			[]Signature{key.SignHash(sigHash)},
+			true,
+		},
+		{
+			"unlock conditions, valid with extra pubkeys",
+			SpendPolicy{PolicyTypeUnlockConditions{
+				PublicKeys:         []UnlockKey{pk.UnlockKey(), PublicKey{1, 2, 3}.UnlockKey(), pk.UnlockKey()},
+				SignaturesRequired: 2,
+			}},
+			1,
+			[]Signature{key.SignHash(sigHash), key.SignHash(sigHash)},
 			true,
 		},
 	} {
@@ -295,6 +336,7 @@ func TestPolicyRoundtrip(t *testing.T) {
 	} {
 		var p2 SpendPolicy
 		roundtrip(p, &p2)
+		jsonRoundtrip(p, &p2)
 		if p.Address() != p2.Address() {
 			t.Fatal("policy did not survive roundtrip")
 		}
@@ -325,7 +367,228 @@ func TestPolicyRoundtrip(t *testing.T) {
 	}
 	var sp2 SatisfiedPolicy
 	roundtrip(sp, &sp2)
+	jsonRoundtrip(sp, &sp2)
 	if fmt.Sprint(sp) != fmt.Sprint(sp2) {
 		t.Fatal("satisfied policy did not survive roundtrip:", sp, sp2)
+	}
+}
+
+func TestSpendPolicyMarshalJSON(t *testing.T) {
+	publicKey := NewPrivateKeyFromSeed(make([]byte, 32)).PublicKey()
+	hash := HashBytes(nil)
+
+	tests := []struct {
+		sp  SpendPolicy
+		exp string
+	}{
+		{
+			sp:  PolicyAbove(100),
+			exp: `{"type":"above","policy":100}`,
+		},
+		{
+			sp:  PolicyAfter(time.Unix(1234567890, 0)),
+			exp: `{"type":"after","policy":1234567890}`,
+		},
+		{
+			sp:  PolicyPublicKey(publicKey),
+			exp: fmt.Sprintf(`{"type":"pk","policy":"ed25519:%x"}`, publicKey[:]),
+		},
+		{
+			sp:  PolicyHash(hash),
+			exp: fmt.Sprintf(`{"type":"h","policy":"h:%x"}`, hash[:]),
+		},
+		{
+			sp: PolicyThreshold(2, []SpendPolicy{
+				PolicyAbove(100),
+				PolicyPublicKey(publicKey),
+				PolicyThreshold(2, []SpendPolicy{
+					PolicyAbove(200),
+					PolicyPublicKey(publicKey),
+				}),
+			}),
+			exp: fmt.Sprintf(`{"type":"thresh","policy":{"n":2,"of":[{"type":"above","policy":100},{"type":"pk","policy":"ed25519:%x"},{"type":"thresh","policy":{"n":2,"of":[{"type":"above","policy":200},{"type":"pk","policy":"ed25519:%x"}]}}]}}`, publicKey[:], publicKey[:]),
+		},
+		{
+			sp: SpendPolicy{PolicyTypeUnlockConditions{
+				Timelock:           123,
+				PublicKeys:         []UnlockKey{publicKey.UnlockKey()},
+				SignaturesRequired: 2,
+			}},
+			exp: fmt.Sprintf(`{"type":"uc","policy":{"timelock":123,"publicKeys":["ed25519:%x"],"signaturesRequired":2}}`, publicKey[:]),
+		},
+	}
+
+	for _, tt := range tests {
+		data, err := json.Marshal(tt.sp)
+		if err != nil {
+			t.Errorf("Expected no error, but got %v", err)
+		} else if string(data) != tt.exp {
+			t.Errorf("Expected %s, but got %s", tt.exp, string(data))
+		}
+	}
+}
+
+func TestSatisfiedPolicyMarshalJSON(t *testing.T) {
+	publicKey := NewPrivateKeyFromSeed(make([]byte, 32)).PublicKey()
+	hash := HashBytes(nil)
+
+	privateKey := NewPrivateKeyFromSeed(make([]byte, 32))
+	signature := privateKey.SignHash(hash)
+
+	tests := []struct {
+		name       string
+		sp         SpendPolicy
+		signatures []Signature
+		preimages  [][]byte
+		exp        string
+	}{
+		{
+			name:       "PolicyWithSignature",
+			sp:         PolicyPublicKey(publicKey),
+			signatures: []Signature{signature},
+			exp:        fmt.Sprintf(`{"policy":{"type":"pk","policy":"ed25519:%x"},"signatures":[%q]}`, publicKey[:], signature),
+		},
+		{
+			name:       "PolicyWithSignaturesAndPreimages",
+			sp:         PolicyThreshold(1, []SpendPolicy{PolicyPublicKey(publicKey), PolicyHash(hash)}),
+			signatures: []Signature{signature},
+			preimages:  [][]byte{{1, 2, 3}},
+			exp:        fmt.Sprintf(`{"policy":{"type":"thresh","policy":{"n":1,"of":[{"type":"pk","policy":"ed25519:%x"},{"type":"h","policy":"h:%x"}]}},"signatures":[%q],"preimages":["010203"]}`, publicKey[:], hash[:], signature),
+		},
+		{
+			name:      "PolicyWithPreimagesOnly",
+			sp:        PolicyHash(hash),
+			preimages: [][]byte{{4, 5, 6}},
+			exp:       fmt.Sprintf(`{"policy":{"type":"h","policy":"h:%x"},"preimages":["040506"]}`, hash[:]),
+		},
+		{
+			name: "PolicyWithEmptySignatures",
+			sp:   PolicyPublicKey(publicKey),
+			exp:  fmt.Sprintf(`{"policy":{"type":"pk","policy":"ed25519:%x"}}`, publicKey[:]),
+		},
+		{
+			name: "PolicyWithEmptyPreimages",
+			sp:   PolicyHash(hash),
+			exp:  fmt.Sprintf(`{"policy":{"type":"h","policy":"h:%x"}}`, hash[:]),
+		},
+	}
+
+	for _, tt := range tests {
+		satisfiedSP := SatisfiedPolicy{
+			Policy:     tt.sp,
+			Signatures: tt.signatures,
+			Preimages:  tt.preimages,
+		}
+
+		data, err := json.Marshal(satisfiedSP)
+		if err != nil {
+			t.Errorf("%s: Marshal() error = %v", tt.name, err)
+		}
+		if string(data) != tt.exp {
+			t.Errorf("%s: expected %s, got %s", tt.name, tt.exp, string(data))
+		}
+	}
+}
+
+func TestSatisfiedPolicyUnmarshaling(t *testing.T) {
+	tests := []struct {
+		name      string
+		jsonData  string
+		expectErr bool
+		preimages [][]byte
+	}{
+		{
+			name:      "InvalidHex",
+			jsonData:  `{"Policy": null, "Signatures": null, "Preimages": ["InvalidHex"]}`,
+			expectErr: true,
+		},
+		{
+			name:      "InvalidPolicy",
+			jsonData:  `{"Policy": "ShouldBeAnObjectOrValidType", "Signatures": null, "Preimages": []}`,
+			expectErr: true,
+		},
+		{
+			name:      "ValidPreimage",
+			jsonData:  `{"Policy": null, "Signatures": null, "Preimages": ["68656c6c6f776f726c64"]}`,
+			expectErr: false,
+			preimages: [][]byte{[]byte("helloworld")},
+		},
+	}
+
+	for _, tt := range tests {
+		var sp SatisfiedPolicy
+		if err := sp.UnmarshalJSON([]byte(tt.jsonData)); (err != nil) != tt.expectErr {
+			t.Errorf("%s: UnmarshalJSON() error = %v, expectErr %v", tt.name, err, tt.expectErr)
+		}
+		if len(tt.preimages) != 0 && !reflect.DeepEqual(tt.preimages, sp.Preimages) {
+			t.Error("preimage mismatch")
+		}
+	}
+}
+
+func TestPolicyTypeUnlockConditionsRoundtrip(t *testing.T) {
+	sp := SpendPolicy{PolicyTypeUnlockConditions(UnlockConditions{
+		Timelock: 0,
+		PublicKeys: []UnlockKey{
+			{
+				Algorithm: NewSpecifier("blank"),
+				Key:       frand.Bytes(40),
+			},
+		},
+		SignaturesRequired: 1,
+	})}
+	parsed, err := ParseSpendPolicy(sp.String())
+	if err != nil {
+		t.Fatal(err)
+	} else if sp.String() != parsed.String() {
+		t.Fatalf("expected %q = %q", sp.String(), parsed.String())
+	}
+}
+
+func TestParseSpendPolicy(t *testing.T) {
+	tests := []struct {
+		str   string
+		valid bool
+	}{
+		{
+			str:   "invalid",
+			valid: false,
+		},
+		{
+			str:   "pk(invalid)",
+			valid: false,
+		},
+		{
+			str:   "pk(0x0102030000000000000000000000000000000000000000000000000000000000)",
+			valid: true,
+		},
+		{
+			str:   "pk( 0x0102030000000000000000000000000000000000000000000000000000000000 )",
+			valid: true,
+		},
+		{
+			str:   "pk(0x01020300000000000000000000 00000000000000000000000000000000000000)",
+			valid: false,
+		},
+		{
+			str: `
+		thresh(1, [
+		    thresh(2, [
+		        pk(  0x0102030000000000000000000000000000000000000000000000000000000000  ),
+		        h( 0x0100000000000000000000000000000000000000000000000000000000000000
+				)
+		    ]),
+		    opaque(
+			0xf72e84ee9e344e424a6764068ffd7fdce4b4e50609892c6801bc1ead79d3ae0d)
+		])
+					`,
+			valid: true,
+		},
+	}
+
+	for _, tt := range tests {
+		if _, err := ParseSpendPolicy(tt.str); (err == nil) != tt.valid {
+			t.Errorf("ParseSpendPolicy(%q) -> %v", tt.str, err)
+		}
 	}
 }

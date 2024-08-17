@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"bytes"
 	"testing"
 
 	"go.sia.tech/core/types"
@@ -42,71 +43,41 @@ func TestElementAccumulatorEncoding(t *testing.T) {
 	}
 }
 
-func TestStorageProofRoot(t *testing.T) {
-	leafHash := types.Hash256{0x01, 0x02, 0x03}
-	validProof := []types.Hash256{
-		{0x0A, 0x0B, 0x0C},
-		{0x0D, 0x0E, 0x0F},
-		{0x10, 0x11, 0x12},
-		{0x13, 0x14, 0x15},
-	}
-	longProof := append(validProof, types.Hash256{0x16, 0x17, 0x18})
-	shortProof := validProof[:2]
+func TestElementAccumulatorRoundTrip(t *testing.T) {
+	leafData := []byte{0x01, 0x02, 0x03, 0x0A, 0x0B, 0x0C}
+	leafHash := types.HashBytes(leafData)
 
-	var validWantRoot types.Hash256
-	validWantRoot.UnmarshalText([]byte(`h:a89dbbb545aa4b46696230d104076f06b57a6ab08b2341c3d012bdc13e23eb35`))
+	for _, numLeaves := range []uint64{0, 1, 2, 3, 10, 1 << 16, 1 << 32, 1 << 63} {
+		acc := ElementAccumulator{NumLeaves: numLeaves}
 
-	tests := []struct {
-		name      string
-		leafHash  types.Hash256
-		leafIndex uint64
-		filesize  uint64
-		proof     []types.Hash256
-		wantRoot  types.Hash256
-		valid     bool
-	}{
-		{
-			name:      "ValidProof",
-			leafHash:  leafHash,
-			leafIndex: 10,
-			filesize:  829,
-			proof:     validProof,
-			wantRoot:  validWantRoot,
-			valid:     true,
-		},
-		{
-			name:      "TooLongProof",
-			leafHash:  leafHash,
-			leafIndex: 10,
-			filesize:  829,
-			proof:     longProof,
-			wantRoot:  validWantRoot,
-			valid:     false,
-		},
-		{
-			name:      "TooShortProof",
-			leafHash:  leafHash,
-			leafIndex: 10,
-			filesize:  829,
-			proof:     shortProof,
-			wantRoot:  validWantRoot,
-			valid:     false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotRoot := storageProofRoot(tt.leafHash, tt.leafIndex, tt.filesize, tt.proof)
-			if tt.valid {
-				if gotRoot != tt.wantRoot {
-					t.Errorf("%s failed: got %v, want %v", tt.name, gotRoot, tt.wantRoot)
-				}
-			} else {
-				if gotRoot == tt.wantRoot {
-					t.Errorf("%s failed: got a valid root for an invalid proof", tt.name)
-				}
+		for i := 0; i < 64; i++ {
+			if acc.hasTreeAtHeight(i) {
+				acc.Trees[i] = leafHash
 			}
-		})
+		}
+
+		var buf bytes.Buffer
+		e := types.NewEncoder(&buf)
+		acc.EncodeTo(e)
+		if err := e.Flush(); err != nil {
+			t.Fatalf("Unexpected error during encoding: %v", err)
+		}
+
+		encodedData := buf.Bytes()
+
+		d := types.NewBufDecoder(encodedData)
+		var decodedAcc ElementAccumulator
+		decodedAcc.DecodeFrom(d)
+
+		if decodedAcc.NumLeaves != acc.NumLeaves {
+			t.Errorf("NumLeaves mismatch: got %d, expected %d", decodedAcc.NumLeaves, acc.NumLeaves)
+		}
+
+		for i, tree := range decodedAcc.Trees {
+			if tree != acc.Trees[i] {
+				t.Errorf("Tree mismatch at %d: got %v, expected %v", i, tree, acc.Trees[i])
+			}
+		}
 	}
 }
 
@@ -119,8 +90,8 @@ func TestUpdateElementProof(t *testing.T) {
 		expectProofLen int
 	}{
 		{
-			name:        "EphemeralLeafIndexPanic",
-			leafIndex:   types.EphemeralLeafIndex,
+			name:        "UnassignedLeafIndexPanic",
+			leafIndex:   types.UnassignedLeafIndex,
 			numLeaves:   5,
 			expectPanic: true,
 		},

@@ -18,6 +18,13 @@ import (
 )
 
 const (
+	v2ResolutionRenewal      = "renewal"
+	v2ResolutionStorageProof = "storageProof"
+	v2ResolutionFinalization = "finalization"
+	v2ResolutionExpiration   = "expiration"
+)
+
+const (
 	// MaxRevisionNumber is used to finalize a FileContract. When a contract's
 	// RevisionNumber is set to this value, no further revisions are possible.
 	MaxRevisionNumber = math.MaxUint64
@@ -30,11 +37,15 @@ const (
 	// a FileContract.
 	HostContractIndex = 1
 
-	// EphemeralLeafIndex is used as the LeafIndex of StateElements that are created
-	// and spent within the same block. Such elements do not require a proof of
-	// existence. They are, however, assigned a proper index and are incorporated
-	// into the state accumulator when the block is processed.
-	EphemeralLeafIndex = math.MaxUint64
+	// UnassignedLeafIndex is a sentinel value used as the LeafIndex of
+	// StateElements that have not been added to the accumulator yet. This is
+	// necessary for constructing blocks sets where later transactions reference
+	// elements created in earlier transactions.
+	//
+	// Most clients do not need to reference this value directly, and should
+	// instead use the EphemeralSiacoinElement and EphemeralSiafundElement
+	// functions to construct dependent transaction sets.
+	UnassignedLeafIndex = 10101010101010101010
 )
 
 // Various specifiers.
@@ -114,6 +125,9 @@ type Specifier [16]byte
 
 // NewSpecifier returns a specifier containing the provided name.
 func NewSpecifier(name string) (s Specifier) {
+	if len(name) > len(s) {
+		panic(fmt.Sprintf("specifier name too long: len(%q) > 16", name))
+	}
 	copy(s[:], name)
 	return
 }
@@ -587,7 +601,7 @@ type Attestation struct {
 type StateElement struct {
 	ID          Hash256   `json:"id"` // SiacoinOutputID, FileContractID, etc.
 	LeafIndex   uint64    `json:"leafIndex"`
-	MerkleProof []Hash256 `json:"merkleProof"`
+	MerkleProof []Hash256 `json:"merkleProof,omitempty"`
 }
 
 // A ChainIndexElement is a record of a ChainIndex within the state accumulator.
@@ -687,7 +701,7 @@ func (txn *V2Transaction) EphemeralSiacoinOutput(i int) SiacoinElement {
 	return SiacoinElement{
 		StateElement: StateElement{
 			ID:        Hash256(txn.SiacoinOutputID(txn.ID(), i)),
-			LeafIndex: EphemeralLeafIndex,
+			LeafIndex: UnassignedLeafIndex,
 		},
 		SiacoinOutput: txn.SiacoinOutputs[i],
 	}
@@ -699,7 +713,7 @@ func (txn *V2Transaction) EphemeralSiafundOutput(i int) SiafundElement {
 	return SiafundElement{
 		StateElement: StateElement{
 			ID:        Hash256(txn.SiafundOutputID(txn.ID(), i)),
-			LeafIndex: EphemeralLeafIndex,
+			LeafIndex: UnassignedLeafIndex,
 		},
 		SiafundOutput: txn.SiafundOutputs[i],
 	}
@@ -736,9 +750,11 @@ func (txn *V2Transaction) DeepCopy() V2Transaction {
 	c.FileContractResolutions = append([]V2FileContractResolution(nil), c.FileContractResolutions...)
 	for i := range c.FileContractResolutions {
 		c.FileContractResolutions[i].Parent.MerkleProof = append([]Hash256(nil), c.FileContractResolutions[i].Parent.MerkleProof...)
-		if sp, ok := c.FileContractResolutions[i].Resolution.(*V2StorageProof); ok {
+		if res, ok := c.FileContractResolutions[i].Resolution.(*V2StorageProof); ok {
+			sp := *res
 			sp.ProofIndex.MerkleProof = append([]Hash256(nil), sp.ProofIndex.MerkleProof...)
 			sp.Proof = append([]Hash256(nil), sp.Proof...)
+			c.FileContractResolutions[i].Resolution = &sp
 		}
 	}
 	c.Attestations = append([]Attestation(nil), c.Attestations...)
@@ -804,7 +820,7 @@ func (b *Block) ID() BlockID {
 // Implementations of fmt.Stringer, encoding.Text(Un)marshaler, and json.(Un)marshaler
 
 func stringerHex(prefix string, data []byte) string {
-	return prefix + ":" + hex.EncodeToString(data[:])
+	return prefix + ":" + hex.EncodeToString(data)
 }
 
 func marshalHex(prefix string, data []byte) ([]byte, error) {
@@ -812,8 +828,12 @@ func marshalHex(prefix string, data []byte) ([]byte, error) {
 }
 
 func unmarshalHex(dst []byte, prefix string, data []byte) error {
-	n, err := hex.Decode(dst, bytes.TrimPrefix(data, []byte(prefix+":")))
-	if n < len(dst) {
+	data = bytes.TrimPrefix(data, []byte(prefix+":"))
+	if len(data) > len(dst)*2 {
+		return fmt.Errorf("decoding %v:<hex> failed: input too long", prefix)
+	}
+	n, err := hex.Decode(dst, data)
+	if err == nil && n < len(dst) {
 		err = io.ErrUnexpectedEOF
 	}
 	if err != nil {
@@ -877,37 +897,47 @@ func ParseChainIndex(s string) (ci ChainIndex, err error) {
 }
 
 // String implements fmt.Stringer.
-func (s Specifier) String() string { return string(bytes.Trim(s[:], "\x00")) }
+func (s Specifier) String() string {
+	b := string(bytes.TrimRight(s[:], "\x00"))
+	for _, c := range b {
+		if !(('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || ('0' <= c && c <= '9')) {
+			return strconv.Quote(b)
+		}
+	}
+	return b
+}
 
 // MarshalText implements encoding.TextMarshaler.
 func (s Specifier) MarshalText() ([]byte, error) { return []byte(s.String()), nil }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (s *Specifier) UnmarshalText(b []byte) error {
-	str, err := strconv.Unquote(string(b))
-	if err != nil {
-		str = string(b)
+	if len(b) > 0 && b[0] == '"' {
+		uq, err := strconv.Unquote(string(b))
+		if err != nil {
+			return err
+		}
+		b = []byte(uq)
 	}
-	if len(str) > len(s) {
-		return fmt.Errorf("specifier %s too long", str)
+	if len(b) > len(s) {
+		return fmt.Errorf("specifier %v too long (%v > 16)", b, len(b))
 	}
-	copy(s[:], str)
+	copy(s[:], b)
 	return nil
 }
 
 // MarshalText implements encoding.TextMarshaler.
 func (uk UnlockKey) MarshalText() ([]byte, error) {
-	return marshalHex(uk.Algorithm.String(), uk.Key[:])
+	return marshalHex(uk.Algorithm.String(), uk.Key)
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (uk *UnlockKey) UnmarshalText(b []byte) error {
-	parts := bytes.Split(b, []byte(":"))
-	if len(parts) != 2 {
-		return errors.New("decoding <algorithm>:<key> failed: wrong number of separators")
-	} else if err := uk.Algorithm.UnmarshalText(parts[0]); err != nil {
+	if i := bytes.LastIndexByte(b, ':'); i < 0 {
+		return errors.New("decoding <algorithm>:<key> failed: no separator")
+	} else if err := uk.Algorithm.UnmarshalText(b[:i]); err != nil {
 		return fmt.Errorf("decoding <algorithm>:<key> failed: %w", err)
-	} else if uk.Key, err = hex.DecodeString(string(parts[1])); err != nil {
+	} else if uk.Key, err = hex.DecodeString(string(b[i+1:])); err != nil {
 		return fmt.Errorf("decoding <algorithm>:<key> failed: %w", err)
 	}
 	return nil
@@ -1011,6 +1041,45 @@ func (sig Signature) MarshalText() ([]byte, error) { return marshalHex("sig", si
 func (sig *Signature) UnmarshalText(b []byte) error { return unmarshalHex(sig[:], "sig", b) }
 
 // MarshalJSON implements json.Marshaler.
+func (fcr FileContractRevision) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ParentID         FileContractID   `json:"parentID"`
+		UnlockConditions UnlockConditions `json:"unlockConditions"`
+		Filesize         uint64           `json:"filesize"`
+		FileMerkleRoot   Hash256          `json:"fileMerkleRoot"`
+		WindowStart      uint64           `json:"windowStart"`
+		WindowEnd        uint64           `json:"windowEnd"`
+		// Payout omitted; see FileContractRevision docstring
+		ValidProofOutputs  []SiacoinOutput `json:"validProofOutputs"`
+		MissedProofOutputs []SiacoinOutput `json:"missedProofOutputs"`
+		UnlockHash         Hash256         `json:"unlockHash"`
+		RevisionNumber     uint64          `json:"revisionNumber"`
+	}{
+		fcr.ParentID,
+		fcr.UnlockConditions,
+		fcr.Filesize,
+		fcr.FileMerkleRoot,
+		fcr.WindowStart,
+		fcr.WindowEnd,
+		fcr.ValidProofOutputs,
+		fcr.MissedProofOutputs,
+		fcr.UnlockHash,
+		fcr.RevisionNumber,
+	})
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (fcr *FileContractRevision) UnmarshalJSON(b []byte) error {
+	type alias FileContractRevision
+	if err := json.Unmarshal(b, (*alias)(fcr)); err != nil {
+		return err
+	}
+	// see FileContractRevision docstring
+	fcr.Payout = NewCurrency(math.MaxUint64, math.MaxUint64)
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
 func (sp StorageProof) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		ParentID FileContractID `json:"parentID"`
@@ -1069,13 +1138,13 @@ func (res V2FileContractResolution) MarshalJSON() ([]byte, error) {
 	var typ string
 	switch res.Resolution.(type) {
 	case *V2FileContractRenewal:
-		typ = "renewal"
+		typ = v2ResolutionRenewal
 	case *V2StorageProof:
-		typ = "storage proof"
+		typ = v2ResolutionStorageProof
 	case *V2FileContractFinalization:
-		typ = "finalization"
+		typ = v2ResolutionFinalization
 	case *V2FileContractExpiration:
-		typ = "expiration"
+		typ = v2ResolutionExpiration
 	default:
 		panic(fmt.Sprintf("unhandled file contract resolution type %T", res.Resolution))
 	}
@@ -1097,13 +1166,13 @@ func (res *V2FileContractResolution) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	switch p.Type {
-	case "renewal":
+	case v2ResolutionRenewal:
 		res.Resolution = new(V2FileContractRenewal)
-	case "storage proof":
+	case v2ResolutionStorageProof:
 		res.Resolution = new(V2StorageProof)
-	case "finalization":
+	case v2ResolutionFinalization:
 		res.Resolution = new(V2FileContractFinalization)
-	case "expiration":
+	case v2ResolutionExpiration:
 		res.Resolution = new(V2FileContractExpiration)
 	default:
 		return fmt.Errorf("unknown file contract resolution type %q", p.Type)

@@ -153,7 +153,7 @@ func validateCurrencyOverflow(ms *MidState, txn types.Transaction) error {
 	return nil
 }
 
-func validateMinimumValues(ms *MidState, txn types.Transaction) error {
+func validateMinimumValues(_ *MidState, txn types.Transaction) error {
 	zero := false
 	for _, sco := range txn.SiacoinOutputs {
 		zero = zero || sco.Value.IsZero()
@@ -271,8 +271,9 @@ func validateFileContracts(ms *MidState, txn types.Transaction, ts V1Transaction
 		parent, ok := ms.fileContractElement(ts, fcr.ParentID)
 		if !ok {
 			return fmt.Errorf("file contract revision %v revises nonexistent file contract %v", i, fcr.ParentID)
-		}
-		if fcr.FileContract.RevisionNumber <= parent.FileContract.RevisionNumber {
+		} else if parent.FileContract.WindowStart < ms.base.childHeight() {
+			return fmt.Errorf("file contract revision %v revises contract after its proof window has opened", i)
+		} else if fcr.FileContract.RevisionNumber <= parent.FileContract.RevisionNumber {
 			return fmt.Errorf("file contract revision %v does not have a higher revision number than its parent", i)
 		} else if types.Hash256(fcr.UnlockConditions.UnlockHash()) != parent.FileContract.UnlockHash {
 			return fmt.Errorf("file contract revision %v claims incorrect unlock conditions", i)
@@ -338,7 +339,7 @@ func validateFileContracts(ms *MidState, txn types.Transaction, ts V1Transaction
 		buf[0] = 0 // leaf hash prefix
 		copy(buf[1:], leaf)
 		root := types.HashBytes(buf)
-		subtreeHeight := bits.Len64(leafIndex ^ (lastLeafIndex(filesize)))
+		subtreeHeight := bits.Len64(leafIndex ^ lastLeafIndex(filesize))
 		for i, h := range proof {
 			if leafIndex&(1<<i) != 0 || i >= subtreeHeight {
 				root = blake2b.SumPair(h, root)
@@ -578,12 +579,14 @@ func validateV2Siacoins(ms *MidState, txn types.V2Transaction) error {
 			return fmt.Errorf("siacoin input %v double-spends parent output (previously spent in %v)", i, txid)
 		} else if j, ok := spent[sci.Parent.ID]; ok {
 			return fmt.Errorf("siacoin input %v double-spends parent output (previously spent by input %v)", i, j)
+		} else if sci.Parent.MaturityHeight > ms.base.childHeight() {
+			return fmt.Errorf("siacoin input %v has immature parent", i)
 		}
 		spent[sci.Parent.ID] = i
 
 		// check accumulator
-		if sci.Parent.LeafIndex == types.EphemeralLeafIndex {
-			if _, ok := ms.ephemeral[sci.Parent.ID]; !ok {
+		if sci.Parent.LeafIndex == types.UnassignedLeafIndex {
+			if !ms.isCreated(sci.Parent.ID) {
 				return fmt.Errorf("siacoin input %v spends nonexistent ephemeral output %v", i, sci.Parent.ID)
 			}
 		} else if !ms.base.Elements.containsUnspentSiacoinElement(sci.Parent) {
@@ -643,8 +646,8 @@ func validateV2Siafunds(ms *MidState, txn types.V2Transaction) error {
 		spent[sfi.Parent.ID] = i
 
 		// check accumulator
-		if sfi.Parent.LeafIndex == types.EphemeralLeafIndex {
-			if _, ok := ms.ephemeral[sfi.Parent.ID]; !ok {
+		if sfi.Parent.LeafIndex == types.UnassignedLeafIndex {
+			if !ms.isCreated(sfi.Parent.ID) {
 				return fmt.Errorf("siafund input %v spends nonexistent ephemeral output %v", i, sfi.Parent.ID)
 			}
 		} else if !ms.base.Elements.containsUnspentSiafundElement(sfi.Parent) {
@@ -748,6 +751,8 @@ func validateV2FileContracts(ms *MidState, txn types.V2Transaction) error {
 		curOutputSum := cur.RenterOutput.Value.Add(cur.HostOutput.Value)
 		revOutputSum := rev.RenterOutput.Value.Add(rev.HostOutput.Value)
 		switch {
+		case cur.ProofHeight < ms.base.childHeight():
+			return fmt.Errorf("revises contract after its proof window has opened")
 		case rev.RevisionNumber <= cur.RevisionNumber:
 			return fmt.Errorf("does not increase revision number (%v -> %v)", cur.RevisionNumber, rev.RevisionNumber)
 		case !revOutputSum.Equals(curOutputSum):
@@ -832,7 +837,7 @@ func validateV2FileContracts(ms *MidState, txn types.V2Transaction) error {
 			} else if sp.ProofIndex.ChainIndex.Height != fc.ProofHeight {
 				// see note on this field in types.StorageProof
 				return fmt.Errorf("file contract storage proof %v has ProofIndex height (%v) that does not match contract ProofHeight (%v)", i, sp.ProofIndex.ChainIndex.Height, fc.ProofHeight)
-			} else if ms.base.Elements.containsChainIndex(sp.ProofIndex) {
+			} else if !ms.base.Elements.containsChainIndex(sp.ProofIndex) {
 				return fmt.Errorf("file contract storage proof %v has invalid history proof", i)
 			}
 			leafIndex := ms.base.StorageProofLeafIndex(fc.Filesize, sp.ProofIndex.ChainIndex.ID, types.FileContractID(fcr.Parent.ID))
@@ -894,6 +899,43 @@ func ValidateV2Transaction(ms *MidState, txn types.V2Transaction) error {
 	return nil
 }
 
+func validateSupplement(s State, b types.Block, bs V1BlockSupplement) error {
+	if len(bs.Transactions) != len(b.Transactions) {
+		return errors.New("incorrect number of transactions")
+	}
+	for _, txn := range bs.Transactions {
+		for _, sce := range txn.SiacoinInputs {
+			if !s.Elements.containsUnspentSiacoinElement(sce) {
+				return fmt.Errorf("siacoin element %v is not present in the accumulator", sce.ID)
+			}
+		}
+		for _, sfe := range txn.SiafundInputs {
+			if !s.Elements.containsUnspentSiafundElement(sfe) {
+				return fmt.Errorf("siafund element %v is not present in the accumulator", sfe.ID)
+			}
+		}
+		for _, fce := range txn.RevisedFileContracts {
+			if !s.Elements.containsUnresolvedFileContractElement(fce) {
+				return fmt.Errorf("revised file contract %v is not present in the accumulator", fce.ID)
+			}
+		}
+		for _, fce := range txn.ValidFileContracts {
+			if !s.Elements.containsUnresolvedFileContractElement(fce) {
+				return fmt.Errorf("valid file contract %v is not present in the accumulator", fce.ID)
+			}
+		}
+		if len(txn.StorageProofBlockIDs) != len(txn.ValidFileContracts) {
+			return errors.New("incorrect number of storage proof block IDs")
+		}
+	}
+	for _, fce := range bs.ExpiringFileContracts {
+		if !s.Elements.containsUnresolvedFileContractElement(fce) {
+			return fmt.Errorf("expiring file contract %v is not present in the accumulator", fce.ID)
+		}
+	}
+	return nil
+}
+
 // ValidateBlock validates b in the context of s.
 //
 // This function does not check whether the header's timestamp is too far in the
@@ -902,6 +944,8 @@ func ValidateV2Transaction(ms *MidState, txn types.V2Transaction) error {
 func ValidateBlock(s State, b types.Block, bs V1BlockSupplement) error {
 	if err := ValidateOrphan(s, b); err != nil {
 		return err
+	} else if err := validateSupplement(s, b, bs); err != nil {
+		return fmt.Errorf("block supplement is invalid: %w", err)
 	}
 	if b.V2 != nil {
 		if b.V2.Commitment != s.Commitment(s.TransactionsCommitment(b.Transactions, b.V2Transactions()), b.MinerPayouts[0].Address) {
