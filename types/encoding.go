@@ -704,7 +704,7 @@ func (ren V2FileContractRenewal) EncodeTo(e *Encoder) {
 
 // EncodeTo implements types.EncoderTo.
 func (fcf V2FileContractFinalization) EncodeTo(e *Encoder) {
-	V2FileContract(fcf).EncodeTo(e)
+	Signature(fcf).EncodeTo(e)
 }
 
 // EncodeTo implements types.EncoderTo.
@@ -848,9 +848,9 @@ func (txn V2TransactionSemantics) EncodeTo(e *Encoder) {
 		// normalize (being careful not to modify the original)
 		switch res := fcr.Resolution.(type) {
 		case *V2FileContractFinalization:
-			fc := *res
-			nilSigs(&fc.RenterSignature, &fc.HostSignature)
-			fcr.Resolution = &fc
+			fcf := *res
+			nilSigs((*Signature)(&fcf))
+			fcr.Resolution = &fcf
 		case *V2FileContractRenewal:
 			renewal := *res
 			nilSigs(
@@ -1299,7 +1299,7 @@ func (ren *V2FileContractRenewal) DecodeFrom(d *Decoder) {
 
 // DecodeFrom implements types.DecoderFrom.
 func (fcf *V2FileContractFinalization) DecodeFrom(d *Decoder) {
-	(*V2FileContract)(fcf).DecodeFrom(d)
+	(*Signature)(fcf).DecodeFrom(d)
 }
 
 // DecodeFrom implements types.DecoderFrom.
