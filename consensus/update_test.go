@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"encoding/hex"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"go.sia.tech/core/internal/blake2b"
 	"go.sia.tech/core/types"
+	"lukechampine.com/frand"
 )
 
 func checkApplyUpdate(t *testing.T, cs State, au ApplyUpdate) {
@@ -160,6 +162,7 @@ func TestApplyBlock(t *testing.T) {
 				t.Fatal("unexpected spent siacoin element")
 			}
 			sce.StateElement = types.StateElement{}
+			sce.ID = types.SiacoinOutputID{}
 			if !reflect.DeepEqual(sce, (*sces)[0]) {
 				t.Fatalf("siacoin element doesn't match:\n%v\nvs\n%v\n", sce, (*sces)[0])
 			}
@@ -174,6 +177,7 @@ func TestApplyBlock(t *testing.T) {
 				t.Fatal("unexpected spent siafund element")
 			}
 			sfe.StateElement = types.StateElement{}
+			sfe.ID = types.SiafundOutputID{}
 			if !reflect.DeepEqual(sfe, (*sfes)[0]) {
 				t.Fatalf("siafund element doesn't match:\n%v\nvs\n%v\n", sfe, (*sfes)[0])
 			}
@@ -193,6 +197,7 @@ func TestApplyBlock(t *testing.T) {
 				t.Fatal("unexpected spent siacoin element")
 			}
 			sce.StateElement = types.StateElement{}
+			sce.ID = types.SiacoinOutputID{}
 			if !reflect.DeepEqual(sce, (*sces)[len(*sces)-1]) {
 				t.Fatalf("siacoin element doesn't match:\n%v\nvs\n%v\n", sce, (*sces)[len(*sces)-1])
 			}
@@ -207,6 +212,7 @@ func TestApplyBlock(t *testing.T) {
 				t.Fatal("unexpected spent siafund element")
 			}
 			sfe.StateElement = types.StateElement{}
+			sfe.ID = types.SiafundOutputID{}
 			if !reflect.DeepEqual(sfe, (*sfes)[len(*sfes)-1]) {
 				t.Fatalf("siafund element doesn't match:\n%v\nvs\n%v\n", sfe, (*sfes)[len(*sfes)-1])
 			}
@@ -542,6 +548,7 @@ func TestApplyRevertBlockV1(t *testing.T) {
 				t.Fatal("unexpected spent siacoin element")
 			}
 			sce.StateElement = types.StateElement{}
+			sce.ID = types.SiacoinOutputID{}
 			if !reflect.DeepEqual(sce, (*sces)[0]) {
 				t.Fatalf("siacoin element doesn't match:\n%v\nvs\n%v\n", sce, (*sces)[0])
 			}
@@ -556,6 +563,7 @@ func TestApplyRevertBlockV1(t *testing.T) {
 				t.Fatal("unexpected spent siafund element")
 			}
 			sfe.StateElement = types.StateElement{}
+			sfe.ID = types.SiafundOutputID{}
 			if !reflect.DeepEqual(sfe, (*sfes)[0]) {
 				t.Fatalf("siafund element doesn't match:\n%v\nvs\n%v\n", sfe, (*sfes)[0])
 			}
@@ -575,6 +583,7 @@ func TestApplyRevertBlockV1(t *testing.T) {
 				t.Fatal("unexpected spent siacoin element")
 			}
 			sce.StateElement = types.StateElement{}
+			sce.ID = types.SiacoinOutputID{}
 			if !reflect.DeepEqual(sce, (*sces)[len(*sces)-1]) {
 				t.Fatalf("siacoin element doesn't match:\n%v\nvs\n%v\n", sce, (*sces)[len(*sces)-1])
 			}
@@ -589,6 +598,7 @@ func TestApplyRevertBlockV1(t *testing.T) {
 				t.Fatal("unexpected spent siafund element")
 			}
 			sfe.StateElement = types.StateElement{}
+			sfe.ID = types.SiafundOutputID{}
 			if !reflect.DeepEqual(sfe, (*sfes)[len(*sfes)-1]) {
 				t.Fatalf("siafund element doesn't match:\n%v\nvs\n%v\n", sfe, (*sfes)[len(*sfes)-1])
 			}
@@ -818,8 +828,8 @@ func TestApplyRevertBlockV1(t *testing.T) {
 		}
 	}
 	addedSCEs = []types.SiacoinElement{
-		{SiacoinOutput: txnB3.FileContracts[0].ValidProofOutputs[1], MaturityHeight: 148},
-		{SiacoinOutput: txnB3.FileContracts[0].ValidProofOutputs[0], MaturityHeight: 148},
+		{SiacoinOutput: txnB3.FileContracts[0].ValidProofOutputs[1], MaturityHeight: cs.MaturityHeight()},
+		{SiacoinOutput: txnB3.FileContracts[0].ValidProofOutputs[0], MaturityHeight: cs.MaturityHeight()},
 		{SiacoinOutput: b5.MinerPayouts[0], MaturityHeight: cs.MaturityHeight()},
 	}
 	spentSCEs = nil
@@ -885,6 +895,9 @@ func TestApplyRevertBlockV2(t *testing.T) {
 	db, cs := newConsensusDB(n, genesisBlock)
 
 	signTxn := func(cs State, txn *types.V2Transaction) {
+		for i := range txn.Attestations {
+			txn.Attestations[i].Signature = giftPrivateKey.SignHash(cs.AttestationSigHash(txn.Attestations[i]))
+		}
 		for i := range txn.SiacoinInputs {
 			txn.SiacoinInputs[i].SatisfiedPolicy.Signatures = []types.Signature{giftPrivateKey.SignHash(cs.InputSigHash(*txn))}
 		}
@@ -931,6 +944,7 @@ func TestApplyRevertBlockV2(t *testing.T) {
 				t.Fatal("unexpected spent siacoin element")
 			}
 			sce.StateElement = types.StateElement{}
+			sce.ID = types.SiacoinOutputID{}
 			if !reflect.DeepEqual(sce, (*sces)[0]) {
 				t.Fatalf("siacoin element doesn't match:\n%v\nvs\n%v\n", sce, (*sces)[0])
 			}
@@ -945,6 +959,7 @@ func TestApplyRevertBlockV2(t *testing.T) {
 				t.Fatal("unexpected spent siafund element")
 			}
 			sfe.StateElement = types.StateElement{}
+			sfe.ID = types.SiafundOutputID{}
 			if !reflect.DeepEqual(sfe, (*sfes)[0]) {
 				t.Fatalf("siafund element doesn't match:\n%v\nvs\n%v\n", sfe, (*sfes)[0])
 			}
@@ -964,6 +979,7 @@ func TestApplyRevertBlockV2(t *testing.T) {
 				t.Fatal("unexpected spent siacoin element")
 			}
 			sce.StateElement = types.StateElement{}
+			sce.ID = types.SiacoinOutputID{}
 			if !reflect.DeepEqual(sce, (*sces)[len(*sces)-1]) {
 				t.Fatalf("siacoin element doesn't match:\n%v\nvs\n%v\n", sce, (*sces)[len(*sces)-1])
 			}
@@ -978,6 +994,7 @@ func TestApplyRevertBlockV2(t *testing.T) {
 				t.Fatal("unexpected spent siafund element")
 			}
 			sfe.StateElement = types.StateElement{}
+			sfe.ID = types.SiafundOutputID{}
 			if !reflect.DeepEqual(sfe, (*sfes)[len(*sfes)-1]) {
 				t.Fatalf("siafund element doesn't match:\n%v\nvs\n%v\n", sfe, (*sfes)[len(*sfes)-1])
 			}
@@ -1011,9 +1028,15 @@ func TestApplyRevertBlockV2(t *testing.T) {
 		checkApplyUpdate(t, cs, au)
 		checkUpdateElements(au, addedSCEs, spentSCEs, addedSFEs, spentSFEs)
 	}
-
 	// block that spends part of the gift transaction
 	txnB2 := types.V2Transaction{
+		Attestations: []types.Attestation{
+			{
+				PublicKey: giftPublicKey,
+				Key:       hex.EncodeToString(frand.Bytes(16)),
+				Value:     frand.Bytes(16),
+			},
+		},
 		SiacoinInputs: []types.V2SiacoinInput{{
 			Parent:          db.sces[giftTxn.SiacoinOutputID(0)],
 			SatisfiedPolicy: satisfiedPolicy(types.StandardUnlockConditions(giftPublicKey)),
@@ -1084,6 +1107,7 @@ func TestApplyRevertBlockV2(t *testing.T) {
 	v1FC.Filesize = 65
 	v1FC.FileMerkleRoot = blake2b.SumPair((State{}).StorageProofLeafHash([]byte{1}), (State{}).StorageProofLeafHash([]byte{2}))
 	v2FC := types.V2FileContract{
+		Capacity:         v1FC.Filesize,
 		Filesize:         v1FC.Filesize,
 		FileMerkleRoot:   v1FC.FileMerkleRoot,
 		ProofHeight:      20,
@@ -1241,8 +1265,8 @@ func TestApplyRevertBlockV2(t *testing.T) {
 	}
 
 	addedSCEs = []types.SiacoinElement{
-		{SiacoinOutput: txnB3.FileContracts[0].RenterOutput, MaturityHeight: 148},
-		{SiacoinOutput: txnB3.FileContracts[0].HostOutput, MaturityHeight: 148},
+		{SiacoinOutput: txnB3.FileContracts[0].RenterOutput, MaturityHeight: cs.MaturityHeight()},
+		{SiacoinOutput: txnB3.FileContracts[0].HostOutput, MaturityHeight: cs.MaturityHeight()},
 		{SiacoinOutput: b5.MinerPayouts[0], MaturityHeight: cs.MaturityHeight()},
 	}
 	spentSCEs = nil
