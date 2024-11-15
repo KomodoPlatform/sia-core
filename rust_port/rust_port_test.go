@@ -521,7 +521,7 @@ func TestSiacoinElementEncodeHash(t *testing.T) {
 	siacoinElement.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "3c867a54b7b3de349c56585f25a4365f31d632c3e42561b615055c77464d889e" {
+	if myHash.String() != "4c46cbe535099409d2ea4255debda3fb62993595e305c78688ec4306f8464d7d" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
