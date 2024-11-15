@@ -575,7 +575,7 @@ func TestSatisfiedPolicyPublicKey(t *testing.T) {
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_encode_hash_empty
+// sia-rust/src/tests/transaction.rs test_satisfied_policy_encode_hash_empty
 func TestSatisfiedPolicyHashEmpty(t *testing.T) {
 	h := NewHasher()
 
@@ -586,11 +586,9 @@ func TestSatisfiedPolicyHashEmpty(t *testing.T) {
 
 	sp.EncodeTo(h.E)
 
-	println("buf: ", hex.EncodeToString(h.E.Buf()[:h.E.N()]))
-
 	myHash := h.Sum()
 
-	if myHash.String() != "h:86b4b84950016d711732617d2501bd22e41614535f2705a65bd5b0e95c992a44" {
+	if myHash.String() != "h:1e612d1ee36338b93a36bac0c52007a2d678cde0bd9b95c36a1f61166cf02b87" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
