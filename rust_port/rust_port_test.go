@@ -452,7 +452,6 @@ func TestStateElementEncodeHash(t *testing.T) {
 	h := NewHasher()
 
 	se := StateElement{
-		ID:          Hash256{1, 2, 3},
 		LeafIndex:   1,
 		MerkleProof: []Hash256{{4, 5, 6}, {7, 8, 9}},
 	}
@@ -470,7 +469,6 @@ func TestStateElementEncodeHashNullMerkleProof(t *testing.T) {
 	h := NewHasher()
 
 	se := StateElement{
-		ID:        Hash256{1, 2, 3},
 		LeafIndex: 1,
 	}
 
@@ -487,7 +485,6 @@ func TestSiacoinElementEncodeHash(t *testing.T) {
 	h := NewHasher()
 
 	stateElement := StateElement{
-		ID:          Hash256{1, 2, 3},
 		LeafIndex:   1,
 		MerkleProof: []Hash256{{4, 5, 6}, {7, 8, 9}},
 	}
@@ -495,6 +492,7 @@ func TestSiacoinElementEncodeHash(t *testing.T) {
 	addr := StandardUnlockHash(PublicKey{1, 2, 3})
 
 	siacoinElement := SiacoinElement{
+		ID:           SiacoinOutputID{1, 2, 3},
 		StateElement: stateElement,
 		SiacoinOutput: SiacoinOutput{
 			Address: addr,
@@ -777,11 +775,11 @@ func TestSiacoinInputEncodeV2(t *testing.T) {
 	}
 
 	stateElement := StateElement{
-		ID:          Hash256{0},
 		LeafIndex:   0,
 		MerkleProof: []Hash256{{0}},
 	}
 	siacoinElement := SiacoinElement{
+		ID:           SiacoinOutputID{0},
 		StateElement: stateElement,
 		SiacoinOutput: SiacoinOutput{
 			Address: address,
@@ -911,12 +909,12 @@ func TestFileContractElementV2Encode(t *testing.T) {
 	}
 
 	stateElement := StateElement{
-		ID:          Hash256{1, 2, 3},
 		LeafIndex:   1,
 		MerkleProof: []Hash256{{4, 5, 6}, {7, 8, 9}},
 	}
 
 	contractElement := V2FileContractElement{
+		ID:             FileContractID{1, 2, 3},
 		StateElement:   stateElement,
 		V2FileContract: contract,
 	}
@@ -968,12 +966,12 @@ func TestFileContractRevisionV2Encode(t *testing.T) {
 	}
 
 	stateElement := StateElement{
-		ID:          Hash256{1, 2, 3},
 		LeafIndex:   1,
 		MerkleProof: []Hash256{{4, 5, 6}, {7, 8, 9}},
 	}
 
 	contractElement := V2FileContractElement{
+		ID:             FileContractID{1, 2, 3},
 		StateElement:   stateElement,
 		V2FileContract: contract,
 	}
