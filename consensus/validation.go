@@ -275,7 +275,7 @@ func validateFileContracts(ms *MidState, txn types.Transaction, ts V1Transaction
 			return fmt.Errorf("file contract revision %v revises contract after its proof window has opened", i)
 		} else if fcr.FileContract.RevisionNumber <= parent.FileContract.RevisionNumber {
 			return fmt.Errorf("file contract revision %v does not have a higher revision number than its parent", i)
-		} else if types.Hash256(fcr.UnlockConditions.UnlockHash()) != parent.FileContract.UnlockHash {
+		} else if fcr.UnlockConditions.UnlockHash() != parent.FileContract.UnlockHash {
 			return fmt.Errorf("file contract revision %v claims incorrect unlock conditions", i)
 		}
 		outputSum := func(outputs []types.SiacoinOutput) (sum types.Currency) {
@@ -493,6 +493,8 @@ func ValidateTransaction(ms *MidState, txn types.Transaction, ts V1TransactionSu
 		return errors.New("v1 transactions are not allowed after v2 hardfork is complete")
 	} else if err := validateCurrencyOverflow(ms, txn); err != nil {
 		return err
+	} else if weight := ms.base.TransactionWeight(txn); weight > ms.base.MaxBlockWeight() {
+		return fmt.Errorf("transaction exceeds maximum block weight (%v > %v)", weight, ms.base.MaxBlockWeight())
 	} else if err := validateMinimumValues(ms, txn); err != nil {
 		return err
 	} else if err := validateSiacoins(ms, txn, ts); err != nil {
@@ -557,7 +559,7 @@ func validateV2CurrencyOverflow(ms *MidState, txn types.V2Transaction) error {
 
 func validateV2Siacoins(ms *MidState, txn types.V2Transaction) error {
 	sigHash := ms.base.InputSigHash(txn)
-	spent := make(map[types.Hash256]int)
+	spent := make(map[types.SiacoinOutputID]int)
 	for i, sci := range txn.SiacoinInputs {
 		if txid, ok := ms.spent(sci.Parent.ID); ok {
 			return fmt.Errorf("siacoin input %v double-spends parent output (previously spent in %v)", i, txid)
@@ -569,7 +571,7 @@ func validateV2Siacoins(ms *MidState, txn types.V2Transaction) error {
 		spent[sci.Parent.ID] = i
 
 		// check accumulator
-		if sci.Parent.LeafIndex == types.UnassignedLeafIndex {
+		if sci.Parent.StateElement.LeafIndex == types.UnassignedLeafIndex {
 			if !ms.isCreated(sci.Parent.ID) {
 				return fmt.Errorf("siacoin input %v spends nonexistent ephemeral output %v", i, sci.Parent.ID)
 			}
@@ -623,7 +625,7 @@ func validateV2Siacoins(ms *MidState, txn types.V2Transaction) error {
 
 func validateV2Siafunds(ms *MidState, txn types.V2Transaction) error {
 	sigHash := ms.base.InputSigHash(txn)
-	spent := make(map[types.Hash256]int)
+	spent := make(map[types.SiafundOutputID]int)
 	for i, sfi := range txn.SiafundInputs {
 		if txid, ok := ms.spent(sfi.Parent.ID); ok {
 			return fmt.Errorf("siafund input %v double-spends parent output (previously spent in %v)", i, txid)
@@ -633,7 +635,7 @@ func validateV2Siafunds(ms *MidState, txn types.V2Transaction) error {
 		spent[sfi.Parent.ID] = i
 
 		// check accumulator
-		if sfi.Parent.LeafIndex == types.UnassignedLeafIndex {
+		if sfi.Parent.StateElement.LeafIndex == types.UnassignedLeafIndex {
 			if !ms.isCreated(sfi.Parent.ID) {
 				return fmt.Errorf("siafund input %v spends nonexistent ephemeral output %v", i, sfi.Parent.ID)
 			}
@@ -670,18 +672,8 @@ func validateV2Siafunds(ms *MidState, txn types.V2Transaction) error {
 }
 
 func validateV2FileContracts(ms *MidState, txn types.V2Transaction) error {
-	// Contract resolutions are height-sensitive, and thus can be invalidated by
-	// shallow reorgs; to minimize disruption, we require that transactions
-	// containing a resolution do not create new outputs. Creating, revising or
-	// resolving contracts *is* permitted, as these effects are generally not
-	// "built upon" as quickly as outputs, and therefore cause less disruption.
-	if len(txn.FileContractResolutions) > 0 &&
-		(len(txn.SiacoinOutputs) > 0 || len(txn.SiafundOutputs) > 0) {
-		return errors.New("transaction both resolves a file contract and creates new outputs")
-	}
-
-	revised := make(map[types.Hash256]int)
-	resolved := make(map[types.Hash256]int)
+	revised := make(map[types.FileContractID]int)
+	resolved := make(map[types.FileContractID]int)
 	validateParent := func(fce types.V2FileContractElement) error {
 		if txid, ok := ms.spent(fce.ID); ok {
 			return fmt.Errorf("has already been resolved in transaction %v", txid)
@@ -725,6 +717,8 @@ func validateV2FileContracts(ms *MidState, txn types.V2Transaction) error {
 
 	validateContract := func(fc types.V2FileContract, renewal bool) error {
 		switch {
+		case fc.Filesize > fc.Capacity:
+			return fmt.Errorf("has filesize (%v) exceeding capacity (%v)", fc.Filesize, fc.Capacity)
 		case fc.ProofHeight < ms.base.childHeight():
 			return fmt.Errorf("has proof height (%v) that has already passed", fc.ProofHeight)
 		case fc.ExpirationHeight <= fc.ProofHeight:
@@ -747,12 +741,18 @@ func validateV2FileContracts(ms *MidState, txn types.V2Transaction) error {
 		curOutputSum := cur.RenterOutput.Value.Add(cur.HostOutput.Value)
 		revOutputSum := rev.RenterOutput.Value.Add(rev.HostOutput.Value)
 		switch {
+		case rev.Capacity < cur.Capacity:
+			return fmt.Errorf("decreases capacity")
+		case rev.Filesize > rev.Capacity:
+			return fmt.Errorf("has filesize (%v) exceeding capacity (%v)", rev.Filesize, rev.Capacity)
 		case cur.ProofHeight < ms.base.childHeight():
 			return fmt.Errorf("revises contract after its proof window has opened")
 		case rev.RevisionNumber <= cur.RevisionNumber:
 			return fmt.Errorf("does not increase revision number (%v -> %v)", cur.RevisionNumber, rev.RevisionNumber)
 		case !revOutputSum.Equals(curOutputSum):
 			return fmt.Errorf("modifies output sum (%d H -> %d H)", curOutputSum, revOutputSum)
+		case rev.MissedHostValue.Cmp(cur.MissedHostValue) > 0:
+			return fmt.Errorf("has missed host value (%d H) exceeding old value (%d H)", rev.MissedHostValue, cur.MissedHostValue)
 		case rev.TotalCollateral != cur.TotalCollateral:
 			return errors.New("modifies total collateral")
 		case rev.ProofHeight < ms.base.childHeight():
@@ -880,6 +880,10 @@ func ValidateV2Transaction(ms *MidState, txn types.V2Transaction) error {
 		return errors.New("v2 transactions are not allowed until v2 hardfork begins")
 	} else if err := validateV2CurrencyOverflow(ms, txn); err != nil {
 		return err
+	} else if weight := ms.base.V2TransactionWeight(txn); weight == 0 {
+		return errors.New("transactions cannot be empty")
+	} else if weight > ms.base.MaxBlockWeight() {
+		return fmt.Errorf("transaction exceeds maximum block weight (%v > %v)", weight, ms.base.MaxBlockWeight())
 	} else if err := validateV2Siacoins(ms, txn); err != nil {
 		return err
 	} else if err := validateV2Siafunds(ms, txn); err != nil {

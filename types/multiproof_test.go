@@ -16,7 +16,7 @@ import (
 // the way they should. This is annoying.
 func multiproofTxns(numTxns int, numElems int) []types.V2Transaction {
 	// fake accumulator state
-	cs := (&consensus.Network{InitialTarget: types.BlockID{0: 1}}).GenesisState()
+	cs := (&consensus.Network{InitialTarget: types.BlockID{0: 1}, BlockInterval: time.Second}).GenesisState()
 	cs.Elements.NumLeaves = 19527 // arbitrary
 	for i := range cs.Elements.Trees {
 		cs.Elements.Trees[i] = frand.Entropy256()
@@ -88,8 +88,7 @@ func multiproofTxns(numTxns int, numElems int) []types.V2Transaction {
 	for i := range txns {
 		for j := range txns[i].SiacoinInputs {
 			if (n+1)%5 == 0 {
-				txns[i].SiacoinInputs[j].Parent.LeafIndex = types.UnassignedLeafIndex
-				txns[i].SiacoinInputs[j].Parent.MerkleProof = nil
+				txns[i].SiacoinInputs[j].Parent.StateElement = types.StateElement{LeafIndex: types.UnassignedLeafIndex}
 			}
 			n++
 		}

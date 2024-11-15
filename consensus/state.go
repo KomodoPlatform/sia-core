@@ -50,6 +50,8 @@ type Network struct {
 	InitialCoinbase types.Currency `json:"initialCoinbase"`
 	MinimumCoinbase types.Currency `json:"minimumCoinbase"`
 	InitialTarget   types.BlockID  `json:"initialTarget"`
+	BlockInterval   time.Duration  `json:"blockInterval"`
+	MaturityDelay   uint64         `json:"maturityDelay"`
 
 	HardforkDevAddr struct {
 		Height     uint64        `json:"height"`
@@ -225,7 +227,7 @@ func (s State) SufficientlyHeavierThan(t State) bool {
 
 // BlockInterval is the expected wall clock time between consecutive blocks.
 func (s State) BlockInterval() time.Duration {
-	return 10 * time.Minute
+	return s.Network.BlockInterval
 }
 
 // BlockReward returns the reward for mining a child block.
@@ -240,7 +242,7 @@ func (s State) BlockReward() types.Currency {
 // MaturityHeight is the height at which various outputs created in the child
 // block will "mature" (become spendable).
 func (s State) MaturityHeight() uint64 {
-	return s.childHeight() + 144
+	return s.childHeight() + s.Network.MaturityDelay
 }
 
 // SiafundCount is the number of siafunds in existence.
@@ -260,8 +262,8 @@ func (s State) FoundationSubsidy() (sco types.SiacoinOutput, exists bool) {
 	sco.Address = s.FoundationPrimaryAddress
 
 	subsidyPerBlock := types.Siacoins(30000)
-	const blocksPerYear = 144 * 365
-	const blocksPerMonth = blocksPerYear / 12
+	blocksPerYear := uint64(365 * 24 * time.Hour / s.BlockInterval())
+	blocksPerMonth := blocksPerYear / 12
 	hardforkHeight := s.Network.HardforkFoundation.Height
 	if s.childHeight() < hardforkHeight || (s.childHeight()-hardforkHeight)%blocksPerMonth != 0 {
 		sco.Value = types.ZeroCurrency
@@ -307,14 +309,14 @@ func (s State) V2TransactionWeight(txn types.V2Transaction) uint64 {
 	var wc writeCounter
 	e := types.NewEncoder(&wc)
 	for _, sci := range txn.SiacoinInputs {
-		sci.Parent.MerkleProof = nil
+		sci.Parent.StateElement.MerkleProof = nil
 		sci.EncodeTo(e)
 	}
 	for _, sco := range txn.SiacoinOutputs {
 		types.V2SiacoinOutput(sco).EncodeTo(e)
 	}
 	for _, sfi := range txn.SiafundInputs {
-		sfi.Parent.MerkleProof = nil
+		sfi.Parent.StateElement.MerkleProof = nil
 		sfi.EncodeTo(e)
 	}
 	for _, sfo := range txn.SiafundOutputs {
@@ -324,14 +326,14 @@ func (s State) V2TransactionWeight(txn types.V2Transaction) uint64 {
 		fc.EncodeTo(e)
 	}
 	for _, fcr := range txn.FileContractRevisions {
-		fcr.Parent.MerkleProof = nil
+		fcr.Parent.StateElement.MerkleProof = nil
 		fcr.EncodeTo(e)
 	}
 	for _, fcr := range txn.FileContractResolutions {
-		fcr.Parent.MerkleProof = nil
+		fcr.Parent.StateElement.MerkleProof = nil
 		if sp, ok := fcr.Resolution.(*types.V2StorageProof); ok {
 			c := *sp // don't modify original
-			c.ProofIndex.MerkleProof = nil
+			c.ProofIndex.StateElement.MerkleProof = nil
 			fcr.Resolution = &c
 		}
 		fcr.EncodeTo(e)
@@ -339,7 +341,8 @@ func (s State) V2TransactionWeight(txn types.V2Transaction) uint64 {
 	for _, a := range txn.Attestations {
 		a.EncodeTo(e)
 	}
-	e.WriteBytes(txn.ArbitraryData)
+	e.Write(txn.ArbitraryData)
+	e.Flush()
 	return uint64(wc.n)
 }
 
@@ -586,12 +589,12 @@ func (s State) AttestationSigHash(a types.Attestation) types.Hash256 {
 // A MidState represents the state of the chain within a block.
 type MidState struct {
 	base               State
-	created            map[types.Hash256]int // indices into element slices
-	spends             map[types.Hash256]types.TransactionID
-	revs               map[types.Hash256]*types.FileContractElement
-	res                map[types.Hash256]bool
-	v2revs             map[types.Hash256]*types.V2FileContractElement
-	v2res              map[types.Hash256]types.V2FileContractResolutionType
+	created            map[types.ElementID]int // indices into element slices
+	spends             map[types.ElementID]types.TransactionID
+	revs               map[types.FileContractID]*types.FileContractElement
+	res                map[types.FileContractID]bool
+	v2revs             map[types.FileContractID]*types.V2FileContractElement
+	v2res              map[types.FileContractID]types.V2FileContractResolutionType
 	siafundPool        types.Currency
 	foundationPrimary  types.Address
 	foundationFailsafe types.Address
@@ -613,33 +616,33 @@ func (ms *MidState) siacoinElement(ts V1TransactionSupplement, id types.SiacoinO
 }
 
 func (ms *MidState) siafundElement(ts V1TransactionSupplement, id types.SiafundOutputID) (types.SiafundElement, bool) {
-	if i, ok := ms.created[types.Hash256(id)]; ok {
+	if i, ok := ms.created[id]; ok {
 		return ms.sfes[i], true
 	}
 	return ts.siafundElement(id)
 }
 
 func (ms *MidState) fileContractElement(ts V1TransactionSupplement, id types.FileContractID) (types.FileContractElement, bool) {
-	if rev, ok := ms.revs[types.Hash256(id)]; ok {
+	if rev, ok := ms.revs[id]; ok {
 		return *rev, true
 	}
-	if i, ok := ms.created[types.Hash256(id)]; ok {
+	if i, ok := ms.created[id]; ok {
 		return ms.fces[i], true
 	}
 	return ts.revision(id)
 }
 
-func (ms *MidState) spent(id types.Hash256) (types.TransactionID, bool) {
+func (ms *MidState) spent(id types.ElementID) (types.TransactionID, bool) {
 	txid, ok := ms.spends[id]
 	return txid, ok
 }
 
-func (ms *MidState) isSpent(id types.Hash256) bool {
+func (ms *MidState) isSpent(id types.ElementID) bool {
 	_, ok := ms.spends[id]
 	return ok
 }
 
-func (ms *MidState) isCreated(id types.Hash256) bool {
+func (ms *MidState) isCreated(id types.ElementID) bool {
 	_, ok := ms.created[id]
 	return ok || id == ms.cie.ID
 }
@@ -648,12 +651,12 @@ func (ms *MidState) isCreated(id types.Hash256) bool {
 func NewMidState(s State) *MidState {
 	return &MidState{
 		base:               s,
-		created:            make(map[types.Hash256]int),
-		spends:             make(map[types.Hash256]types.TransactionID),
-		revs:               make(map[types.Hash256]*types.FileContractElement),
-		res:                make(map[types.Hash256]bool),
-		v2revs:             make(map[types.Hash256]*types.V2FileContractElement),
-		v2res:              make(map[types.Hash256]types.V2FileContractResolutionType),
+		created:            make(map[types.ElementID]int),
+		spends:             make(map[types.ElementID]types.TransactionID),
+		revs:               make(map[types.FileContractID]*types.FileContractElement),
+		res:                make(map[types.FileContractID]bool),
+		v2revs:             make(map[types.FileContractID]*types.V2FileContractElement),
+		v2res:              make(map[types.FileContractID]types.V2FileContractResolutionType),
 		siafundPool:        s.SiafundPool,
 		foundationPrimary:  s.FoundationPrimaryAddress,
 		foundationFailsafe: s.FoundationFailsafeAddress,

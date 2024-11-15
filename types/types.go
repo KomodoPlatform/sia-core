@@ -257,7 +257,7 @@ type FileContract struct {
 	Payout             Currency        `json:"payout"`
 	ValidProofOutputs  []SiacoinOutput `json:"validProofOutputs"`
 	MissedProofOutputs []SiacoinOutput `json:"missedProofOutputs"`
-	UnlockHash         Hash256         `json:"unlockHash"`
+	UnlockHash         Address         `json:"unlockHash"`
 	RevisionNumber     uint64          `json:"revisionNumber"`
 }
 
@@ -400,6 +400,17 @@ type Transaction struct {
 	Signatures            []TransactionSignature `json:"signatures,omitempty"`
 }
 
+// MarshalJSON implements json.Marshaller.
+//
+// For convenience, the transaction's ID is also calculated and included. This field is ignored during unmarshalling.
+func (txn Transaction) MarshalJSON() ([]byte, error) {
+	type jsonTxn Transaction // prevent recursion
+	return json.Marshal(struct {
+		ID TransactionID `json:"id"`
+		jsonTxn
+	}{txn.ID(), jsonTxn(txn)})
+}
+
 // ID returns the "semantic hash" of the transaction, covering all of the
 // transaction's effects, but not incidental data such as signatures. This
 // ensures that the ID will remain stable (i.e. non-malleable).
@@ -455,6 +466,7 @@ func (txn *Transaction) TotalFees() Currency {
 // or "missed" depending on whether a valid StorageProof is submitted for the
 // contract.
 type V2FileContract struct {
+	Capacity         uint64        `json:"capacity"`
 	Filesize         uint64        `json:"filesize"`
 	FileMerkleRoot   Hash256       `json:"fileMerkleRoot"`
 	ProofHeight      uint64        `json:"proofHeight"`
@@ -554,6 +566,16 @@ func (*V2FileContractExpiration) isV2FileContractResolution()   {}
 // revisions and immediately creating its valid outputs.
 type V2FileContractFinalization Signature
 
+// MarshalText implements encoding.TextMarshaler.
+func (fcf V2FileContractFinalization) MarshalText() ([]byte, error) {
+	return []byte(hex.EncodeToString(fcf[:])), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (fcf *V2FileContractFinalization) UnmarshalText(data []byte) error {
+	return unmarshalHex(fcf[:], data)
+}
+
 // A V2FileContractRenewal renews a file contract.
 type V2FileContractRenewal struct {
 	FinalRevision  V2FileContract `json:"finalRevision"`
@@ -602,52 +624,65 @@ type Attestation struct {
 	Signature Signature `json:"signature"`
 }
 
+// An AttestationID uniquely identifies an attestation.
+type AttestationID Hash256
+
+// An ElementID identifies a generic element within the state accumulator. In
+// practice, it may be a BlockID, SiacoinOutputID, SiafundOutputID,
+// FileContractID, or AttestationID.
+type ElementID = [32]byte
+
 // A StateElement is a generic element within the state accumulator.
 type StateElement struct {
-	ID          Hash256   `json:"id"` // SiacoinOutputID, FileContractID, etc.
 	LeafIndex   uint64    `json:"leafIndex"`
 	MerkleProof []Hash256 `json:"merkleProof,omitempty"`
 }
 
 // A ChainIndexElement is a record of a ChainIndex within the state accumulator.
 type ChainIndexElement struct {
-	StateElement
-	ChainIndex ChainIndex `json:"chainIndex"`
+	ID           BlockID      `json:"id"`
+	StateElement StateElement `json:"stateElement"`
+	ChainIndex   ChainIndex   `json:"chainIndex"`
 }
 
 // A SiacoinElement is a record of a SiacoinOutput within the state accumulator.
 type SiacoinElement struct {
-	StateElement
-	SiacoinOutput  SiacoinOutput `json:"siacoinOutput"`
-	MaturityHeight uint64        `json:"maturityHeight"`
+	ID             SiacoinOutputID `json:"id"`
+	StateElement   StateElement    `json:"stateElement"`
+	SiacoinOutput  SiacoinOutput   `json:"siacoinOutput"`
+	MaturityHeight uint64          `json:"maturityHeight"`
 }
 
 // A SiafundElement is a record of a SiafundOutput within the state accumulator.
 type SiafundElement struct {
-	StateElement
-	SiafundOutput SiafundOutput `json:"siafundOutput"`
-	ClaimStart    Currency      `json:"claimStart"` // value of SiafundPool when element was created
+	ID            SiafundOutputID `json:"id"`
+	StateElement  StateElement    `json:"stateElement"`
+	SiafundOutput SiafundOutput   `json:"siafundOutput"`
+	ClaimStart    Currency        `json:"claimStart"` // value of SiafundPool when element was created
 }
 
 // A FileContractElement is a record of a FileContract within the state
 // accumulator.
 type FileContractElement struct {
-	StateElement
-	FileContract FileContract `json:"fileContract"`
+	ID           FileContractID `json:"id"`
+	StateElement StateElement   `json:"stateElement"`
+	FileContract FileContract   `json:"fileContract"`
 }
 
 // A V2FileContractElement is a record of a V2FileContract within the state
 // accumulator.
 type V2FileContractElement struct {
-	StateElement
+	ID             FileContractID `json:"id"`
+	StateElement   StateElement   `json:"stateElement"`
 	V2FileContract V2FileContract `json:"v2FileContract"`
 }
 
 // An AttestationElement is a record of an Attestation within the state
 // accumulator.
 type AttestationElement struct {
-	StateElement
-	Attestation Attestation `json:"attestation"`
+	ID           AttestationID `json:"id"`
+	StateElement StateElement  `json:"stateElement"`
+	Attestation  Attestation   `json:"attestation"`
 }
 
 // A V2Transaction effects a change of blockchain state.
@@ -663,6 +698,17 @@ type V2Transaction struct {
 	ArbitraryData           []byte                     `json:"arbitraryData,omitempty"`
 	NewFoundationAddress    *Address                   `json:"newFoundationAddress,omitempty"`
 	MinerFee                Currency                   `json:"minerFee"`
+}
+
+// MarshalJSON implements json.Marshaller.
+//
+// For convenience, the transaction's ID is also calculated and included. This field is ignored during unmarshalling.
+func (txn V2Transaction) MarshalJSON() ([]byte, error) {
+	type jsonTxn V2Transaction // prevent recursion
+	return json.Marshal(struct {
+		ID TransactionID `json:"id"`
+		jsonTxn
+	}{txn.ID(), jsonTxn(txn)})
 }
 
 // ID returns the "semantic hash" of the transaction, covering all of the
@@ -696,7 +742,7 @@ func (*V2Transaction) V2FileContractID(txid TransactionID, i int) FileContractID
 }
 
 // AttestationID returns the ID for the attestation at index i.
-func (*V2Transaction) AttestationID(txid TransactionID, i int) Hash256 {
+func (*V2Transaction) AttestationID(txid TransactionID, i int) AttestationID {
 	return hashAll("id/attestation", txid, i)
 }
 
@@ -705,9 +751,9 @@ func (*V2Transaction) AttestationID(txid TransactionID, i int) Hash256 {
 func (txn *V2Transaction) EphemeralSiacoinOutput(i int) SiacoinElement {
 	return SiacoinElement{
 		StateElement: StateElement{
-			ID:        Hash256(txn.SiacoinOutputID(txn.ID(), i)),
 			LeafIndex: UnassignedLeafIndex,
 		},
+		ID:            txn.SiacoinOutputID(txn.ID(), i),
 		SiacoinOutput: txn.SiacoinOutputs[i],
 	}
 }
@@ -717,9 +763,9 @@ func (txn *V2Transaction) EphemeralSiacoinOutput(i int) SiacoinElement {
 func (txn *V2Transaction) EphemeralSiafundOutput(i int) SiafundElement {
 	return SiafundElement{
 		StateElement: StateElement{
-			ID:        Hash256(txn.SiafundOutputID(txn.ID(), i)),
 			LeafIndex: UnassignedLeafIndex,
 		},
+		ID:            txn.SiafundOutputID(txn.ID(), i),
 		SiafundOutput: txn.SiafundOutputs[i],
 	}
 }
@@ -729,14 +775,14 @@ func (txn *V2Transaction) DeepCopy() V2Transaction {
 	c := *txn
 	c.SiacoinInputs = append([]V2SiacoinInput(nil), c.SiacoinInputs...)
 	for i := range c.SiacoinInputs {
-		c.SiacoinInputs[i].Parent.MerkleProof = append([]Hash256(nil), c.SiacoinInputs[i].Parent.MerkleProof...)
+		c.SiacoinInputs[i].Parent.StateElement.MerkleProof = append([]Hash256(nil), c.SiacoinInputs[i].Parent.StateElement.MerkleProof...)
 		c.SiacoinInputs[i].SatisfiedPolicy.Signatures = append([]Signature(nil), c.SiacoinInputs[i].SatisfiedPolicy.Signatures...)
 		c.SiacoinInputs[i].SatisfiedPolicy.Preimages = append([][32]byte(nil), c.SiacoinInputs[i].SatisfiedPolicy.Preimages...)
 	}
 	c.SiacoinOutputs = append([]SiacoinOutput(nil), c.SiacoinOutputs...)
 	c.SiafundInputs = append([]V2SiafundInput(nil), c.SiafundInputs...)
 	for i := range c.SiafundInputs {
-		c.SiafundInputs[i].Parent.MerkleProof = append([]Hash256(nil), c.SiafundInputs[i].Parent.MerkleProof...)
+		c.SiafundInputs[i].Parent.StateElement.MerkleProof = append([]Hash256(nil), c.SiafundInputs[i].Parent.StateElement.MerkleProof...)
 		c.SiafundInputs[i].SatisfiedPolicy.Signatures = append([]Signature(nil), c.SiafundInputs[i].SatisfiedPolicy.Signatures...)
 		c.SiafundInputs[i].SatisfiedPolicy.Preimages = append([][32]byte(nil), c.SiafundInputs[i].SatisfiedPolicy.Preimages...)
 	}
@@ -744,14 +790,14 @@ func (txn *V2Transaction) DeepCopy() V2Transaction {
 	c.FileContracts = append([]V2FileContract(nil), c.FileContracts...)
 	c.FileContractRevisions = append([]V2FileContractRevision(nil), c.FileContractRevisions...)
 	for i := range c.FileContractRevisions {
-		c.FileContractRevisions[i].Parent.MerkleProof = append([]Hash256(nil), c.FileContractRevisions[i].Parent.MerkleProof...)
+		c.FileContractRevisions[i].Parent.StateElement.MerkleProof = append([]Hash256(nil), c.FileContractRevisions[i].Parent.StateElement.MerkleProof...)
 	}
 	c.FileContractResolutions = append([]V2FileContractResolution(nil), c.FileContractResolutions...)
 	for i := range c.FileContractResolutions {
-		c.FileContractResolutions[i].Parent.MerkleProof = append([]Hash256(nil), c.FileContractResolutions[i].Parent.MerkleProof...)
+		c.FileContractResolutions[i].Parent.StateElement.MerkleProof = append([]Hash256(nil), c.FileContractResolutions[i].Parent.StateElement.MerkleProof...)
 		if res, ok := c.FileContractResolutions[i].Resolution.(*V2StorageProof); ok {
 			sp := *res
-			sp.ProofIndex.MerkleProof = append([]Hash256(nil), sp.ProofIndex.MerkleProof...)
+			sp.ProofIndex.StateElement.MerkleProof = append([]Hash256(nil), sp.ProofIndex.StateElement.MerkleProof...)
 			sp.Proof = append([]Hash256(nil), sp.Proof...)
 			c.FileContractResolutions[i].Resolution = &sp
 		}
@@ -816,39 +862,28 @@ func (b *Block) ID() BlockID {
 	return BlockID(HashBytes(buf))
 }
 
-// Implementations of fmt.Stringer, encoding.Text(Un)marshaler, and json.(Un)marshaler
-
-func stringerHex(prefix string, data []byte) string {
-	return prefix + ":" + hex.EncodeToString(data)
-}
-
-func marshalHex(prefix string, data []byte) ([]byte, error) {
-	return []byte(stringerHex(prefix, data)), nil
-}
-
-func unmarshalHex(dst []byte, prefix string, data []byte) error {
-	data = bytes.TrimPrefix(data, []byte(prefix+":"))
+func unmarshalHex(dst []byte, data []byte) error {
 	if len(data) > len(dst)*2 {
-		return fmt.Errorf("decoding %v:<hex> failed: input too long", prefix)
+		return errors.New("input too long")
 	}
 	n, err := hex.Decode(dst, data)
 	if err == nil && n < len(dst) {
 		err = io.ErrUnexpectedEOF
 	}
 	if err != nil {
-		return fmt.Errorf("decoding %v:<hex> failed: %w", prefix, err)
+		return fmt.Errorf("decoding %q failed: %w", data, err)
 	}
 	return nil
 }
 
 // String implements fmt.Stringer.
-func (h Hash256) String() string { return stringerHex("h", h[:]) }
+func (h Hash256) String() string { return hex.EncodeToString(h[:]) }
 
 // MarshalText implements encoding.TextMarshaler.
-func (h Hash256) MarshalText() ([]byte, error) { return marshalHex("h", h[:]) }
+func (h Hash256) MarshalText() ([]byte, error) { return []byte(hex.EncodeToString(h[:])), nil }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (h *Hash256) UnmarshalText(b []byte) error { return unmarshalHex(h[:], "h", b) }
+func (h *Hash256) UnmarshalText(b []byte) error { return unmarshalHex(h[:], b) }
 
 // String implements fmt.Stringer.
 func (ci ChainIndex) String() string {
@@ -927,7 +962,7 @@ func (s *Specifier) UnmarshalText(b []byte) error {
 
 // MarshalText implements encoding.TextMarshaler.
 func (uk UnlockKey) MarshalText() ([]byte, error) {
-	return marshalHex(uk.Algorithm.String(), uk.Key)
+	return []byte(uk.Algorithm.String() + ":" + hex.EncodeToString(uk.Key)), nil
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
@@ -945,25 +980,28 @@ func (uk *UnlockKey) UnmarshalText(b []byte) error {
 // String implements fmt.Stringer.
 func (a Address) String() string {
 	checksum := HashBytes(a[:])
-	return stringerHex("addr", append(a[:], checksum[:6]...))
+	return hex.EncodeToString(append(a[:], checksum[:6]...))
 }
 
 // MarshalText implements encoding.TextMarshaler.
 func (a Address) MarshalText() ([]byte, error) { return []byte(a.String()), nil }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (a *Address) UnmarshalText(b []byte) (err error) {
+func (a *Address) UnmarshalText(b []byte) error {
 	withChecksum := make([]byte, 32+6)
-	n, err := hex.Decode(withChecksum, bytes.TrimPrefix(b, []byte("addr:")))
+	if len(b) != len(withChecksum)*2 {
+		return fmt.Errorf("address must be %d characters", len(withChecksum)*2)
+	}
+	n, err := hex.Decode(withChecksum, b)
 	if err != nil {
-		err = fmt.Errorf("decoding addr:<hex> failed: %w", err)
+		return fmt.Errorf("decoding %q failed: %w", b, err)
 	} else if n != len(withChecksum) {
-		err = fmt.Errorf("decoding addr:<hex> failed: %w", io.ErrUnexpectedEOF)
+		return fmt.Errorf("decoding %q failed: %w", b, io.ErrUnexpectedEOF)
 	} else if checksum := HashBytes(withChecksum[:32]); !bytes.Equal(checksum[:6], withChecksum[32:]) {
-		err = errors.New("bad checksum")
+		return errors.New("bad checksum")
 	}
 	copy(a[:], withChecksum[:32])
-	return
+	return nil
 }
 
 // ParseAddress parses an address from a prefixed hex encoded string.
@@ -973,71 +1011,100 @@ func ParseAddress(s string) (a Address, err error) {
 }
 
 // String implements fmt.Stringer.
-func (bid BlockID) String() string { return stringerHex("bid", bid[:]) }
+func (bid BlockID) String() string { return hex.EncodeToString(bid[:]) }
 
 // MarshalText implements encoding.TextMarshaler.
-func (bid BlockID) MarshalText() ([]byte, error) { return marshalHex("bid", bid[:]) }
+func (bid BlockID) MarshalText() ([]byte, error) { return []byte(hex.EncodeToString(bid[:])), nil }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (bid *BlockID) UnmarshalText(b []byte) error { return unmarshalHex(bid[:], "bid", b) }
+func (bid *BlockID) UnmarshalText(b []byte) error { return unmarshalHex(bid[:], b) }
 
 // String implements fmt.Stringer.
-func (pk PublicKey) String() string { return stringerHex("ed25519", pk[:]) }
+func (pk PublicKey) String() string { return "ed25519:" + hex.EncodeToString(pk[:]) }
 
 // MarshalText implements encoding.TextMarshaler.
-func (pk PublicKey) MarshalText() ([]byte, error) { return marshalHex("ed25519", pk[:]) }
+func (pk PublicKey) MarshalText() ([]byte, error) { return []byte(pk.String()), nil }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (pk *PublicKey) UnmarshalText(b []byte) error { return unmarshalHex(pk[:], "ed25519", b) }
+func (pk *PublicKey) UnmarshalText(b []byte) error {
+	i := bytes.IndexByte(b, ':')
+	if i < 0 {
+		return errors.New("missing separator")
+	} else if string(b[:i]) != "ed25519" {
+		return fmt.Errorf("unknown algorithm %q", b[:i])
+	}
+	return unmarshalHex(pk[:], b[i+1:])
+}
 
 // String implements fmt.Stringer.
-func (tid TransactionID) String() string { return stringerHex("txid", tid[:]) }
+func (tid TransactionID) String() string { return hex.EncodeToString(tid[:]) }
 
 // MarshalText implements encoding.TextMarshaler.
-func (tid TransactionID) MarshalText() ([]byte, error) { return marshalHex("txid", tid[:]) }
+func (tid TransactionID) MarshalText() ([]byte, error) {
+	return []byte(hex.EncodeToString(tid[:])), nil
+}
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (tid *TransactionID) UnmarshalText(b []byte) error { return unmarshalHex(tid[:], "txid", b) }
+func (tid *TransactionID) UnmarshalText(b []byte) error { return unmarshalHex(tid[:], b) }
 
 // String implements fmt.Stringer.
-func (scoid SiacoinOutputID) String() string { return stringerHex("scoid", scoid[:]) }
+func (aid AttestationID) String() string { return hex.EncodeToString(aid[:]) }
 
 // MarshalText implements encoding.TextMarshaler.
-func (scoid SiacoinOutputID) MarshalText() ([]byte, error) { return marshalHex("scoid", scoid[:]) }
+func (aid AttestationID) MarshalText() ([]byte, error) {
+	return []byte(hex.EncodeToString(aid[:])), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (aid *AttestationID) UnmarshalText(b []byte) error {
+	return unmarshalHex(aid[:], b)
+}
+
+// String implements fmt.Stringer.
+func (scoid SiacoinOutputID) String() string { return hex.EncodeToString(scoid[:]) }
+
+// MarshalText implements encoding.TextMarshaler.
+func (scoid SiacoinOutputID) MarshalText() ([]byte, error) {
+	return []byte(hex.EncodeToString(scoid[:])), nil
+}
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (scoid *SiacoinOutputID) UnmarshalText(b []byte) error {
-	return unmarshalHex(scoid[:], "scoid", b)
+	return unmarshalHex(scoid[:], b)
 }
 
 // String implements fmt.Stringer.
-func (sfoid SiafundOutputID) String() string { return stringerHex("sfoid", sfoid[:]) }
+func (sfoid SiafundOutputID) String() string { return hex.EncodeToString(sfoid[:]) }
 
 // MarshalText implements encoding.TextMarshaler.
-func (sfoid SiafundOutputID) MarshalText() ([]byte, error) { return marshalHex("sfoid", sfoid[:]) }
+func (sfoid SiafundOutputID) MarshalText() ([]byte, error) {
+	return []byte(hex.EncodeToString(sfoid[:])), nil
+}
 
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (sfoid *SiafundOutputID) UnmarshalText(b []byte) error {
-	return unmarshalHex(sfoid[:], "sfoid", b)
+	return unmarshalHex(sfoid[:], b)
 }
 
 // String implements fmt.Stringer.
-func (fcid FileContractID) String() string { return stringerHex("fcid", fcid[:]) }
+func (fcid FileContractID) String() string { return hex.EncodeToString(fcid[:]) }
 
 // MarshalText implements encoding.TextMarshaler.
-func (fcid FileContractID) MarshalText() ([]byte, error) { return marshalHex("fcid", fcid[:]) }
+func (fcid FileContractID) MarshalText() ([]byte, error) {
+	return []byte(hex.EncodeToString(fcid[:])), nil
+}
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (fcid *FileContractID) UnmarshalText(b []byte) error { return unmarshalHex(fcid[:], "fcid", b) }
+func (fcid *FileContractID) UnmarshalText(b []byte) error { return unmarshalHex(fcid[:], b) }
 
 // String implements fmt.Stringer.
-func (sig Signature) String() string { return stringerHex("sig", sig[:]) }
+func (sig Signature) String() string { return hex.EncodeToString(sig[:]) }
 
 // MarshalText implements encoding.TextMarshaler.
-func (sig Signature) MarshalText() ([]byte, error) { return marshalHex("sig", sig[:]) }
+func (sig Signature) MarshalText() ([]byte, error) { return []byte(hex.EncodeToString(sig[:])), nil }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (sig *Signature) UnmarshalText(b []byte) error { return unmarshalHex(sig[:], "sig", b) }
+func (sig *Signature) UnmarshalText(b []byte) error { return unmarshalHex(sig[:], b) }
 
 // MarshalJSON implements json.Marshaler.
 func (fcr FileContractRevision) MarshalJSON() ([]byte, error) {
@@ -1051,7 +1118,7 @@ func (fcr FileContractRevision) MarshalJSON() ([]byte, error) {
 		// Payout omitted; see FileContractRevision docstring
 		ValidProofOutputs  []SiacoinOutput `json:"validProofOutputs"`
 		MissedProofOutputs []SiacoinOutput `json:"missedProofOutputs"`
-		UnlockHash         Hash256         `json:"unlockHash"`
+		UnlockHash         Address         `json:"unlockHash"`
 		RevisionNumber     uint64          `json:"revisionNumber"`
 	}{
 		fcr.ParentID,
