@@ -21,7 +21,7 @@ Verbose as possible to enable quickly identifying the source of any discrepancie
 func TestStandardUnlockHash(t *testing.T) {
 	pk := PublicKey{1, 2, 3}
 	p := SpendPolicy{PolicyTypeUnlockConditions(StandardUnlockConditions(pk))}
-	if p.Address().String() != "addr:72b0762b382d4c251af5ae25b6777d908726d75962e5224f98d7f619bb39515dd64b9a56043a" {
+	if p.Address().String() != "72b0762b382d4c251af5ae25b6777d908726d75962e5224f98d7f619bb39515dd64b9a56043a" {
 		t.Fatal("wrong address:", p, p.Address())
 	} else if StandardUnlockHash(pk) != p.Address() {
 		t.Fatal("StandardUnlockHash differs from Policy.Address")
@@ -37,7 +37,7 @@ func TestUnlockConditions2of2Multisig(t *testing.T) {
 			PublicKey{1, 1, 1}.UnlockKey()},
 		SignaturesRequired: 2,
 	}
-	if UnlockConditionsRoot(uc).String() != "addr:1e94357817d236167e54970a8c08bbd41b37bfceeeb52f6c1ce6dd01d50ea1e73a7c081d3178" {
+	if UnlockConditionsRoot(uc).String() != "1e94357817d236167e54970a8c08bbd41b37bfceeeb52f6c1ce6dd01d50ea1e73a7c081d3178" {
 		t.Fatal("wrong address:", uc, UnlockConditionsRoot(uc).String())
 	}
 }
@@ -51,7 +51,7 @@ func TestUnlockConditions1of2Multisig(t *testing.T) {
 			PublicKey{1, 1, 1}.UnlockKey()},
 		SignaturesRequired: 1,
 	}
-	if UnlockConditionsRoot(uc).String() != "addr:d7f84e3423da09d111a17f64290c8d05e1cbe4cab2b6bed49e3a4d2f659f0585264e9181a51a" {
+	if UnlockConditionsRoot(uc).String() != "d7f84e3423da09d111a17f64290c8d05e1cbe4cab2b6bed49e3a4d2f659f0585264e9181a51a" {
 		t.Fatal("wrong address:", uc, UnlockConditionsRoot(uc).String())
 	}
 }
@@ -156,7 +156,7 @@ func TestPolicyAboveEncodeHash(t *testing.T) {
 	if myHash.String() != "h:bebf6cbdfb440a92e3e5d832ac30fe5d226ff6b352ed3a9398b7d35f086a8ab6" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
-	if myaddress.String() != "addr:188b997bb99dee13e95f92c3ea150bd76b3ec72e5ba57b0d57439a1a6e2865e9b25ea5d1825e" {
+	if myaddress.String() != "188b997bb99dee13e95f92c3ea150bd76b3ec72e5ba57b0d57439a1a6e2865e9b25ea5d1825e" {
 		t.Fatal("wrong address:", myaddress.String())
 	}
 }
@@ -175,7 +175,7 @@ func TestPolicyAfterEncodeHash(t *testing.T) {
 	if myHash.String() != "h:07b0f28eafd87a082ad11dc4724e1c491821260821a30bec68254444f97d9311" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
-	if myaddress.String() != "addr:60c74e0ce5cede0f13f83b0132cb195c995bc7688c9fac34bbf2b14e14394b8bbe2991bc017f" {
+	if myaddress.String() != "60c74e0ce5cede0f13f83b0132cb195c995bc7688c9fac34bbf2b14e14394b8bbe2991bc017f" {
 		t.Fatal("wrong address:", myaddress.String())
 	}
 }
@@ -193,7 +193,7 @@ func TestPolicyPublicKeyEncodeHash(t *testing.T) {
 	if myHash.String() != "h:4355c8f80f6e5a98b70c9c2f9a22f17747989b4744783c90439b2b034f698bfe" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
-	if myaddress.String() != "addr:55a7793237722c6df8222fd512063cb74228085ef1805c5184713648c159b919ac792fbad0e1" {
+	if myaddress.String() != "55a7793237722c6df8222fd512063cb74228085ef1805c5184713648c159b919ac792fbad0e1" {
 		t.Fatal("wrong address:", myaddress.String())
 	}
 }
@@ -211,7 +211,7 @@ func TestPolicyHash(t *testing.T) {
 	if myHash.String() != "h:9938967aefa6cbecc1f1620d2df5170d6811d4b2f47a879b621c1099a3b0628a" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
-	if myaddress.String() != "addr:a4d5a06d8d3c2e45aa26627858ce8e881505ae3c9d122a1d282c7824163751936cffb347e435" {
+	if myaddress.String() != "a4d5a06d8d3c2e45aa26627858ce8e881505ae3c9d122a1d282c7824163751936cffb347e435" {
 		t.Fatal("wrong address:", myaddress.String())
 	}
 }
@@ -232,7 +232,7 @@ func TestPolicyThreshold(t *testing.T) {
 	if myHash.String() != "h:7d792df6cd0b5e0f795287b3bf4087bbcc4c1bd0c52880a552cdda3e5e33d802" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
-	if myaddress.String() != "addr:4179b53aba165e46e4c85b3c8766bb758fb6f0bfa5721550b81981a3ec38efc460557dc1ded4" {
+	if myaddress.String() != "4179b53aba165e46e4c85b3c8766bb758fb6f0bfa5721550b81981a3ec38efc460557dc1ded4" {
 		t.Fatal("wrong address:", myaddress.String())
 	}
 }
@@ -252,12 +252,12 @@ func TestPolicyUnlockConditionEncodeSpecialCase(t *testing.T) {
 	// Unlock condition SpendPolicy has a special condition for v1 comaptibility if it is not within a Threshold
 	originalUnlockConditions := UnlockConditions(unlock_condition)
 	uc_address := originalUnlockConditions.UnlockHash()
-	if uc_address.String() != "addr:72b0762b382d4c251af5ae25b6777d908726d75962e5224f98d7f619bb39515dd64b9a56043a" {
+	if uc_address.String() != "72b0762b382d4c251af5ae25b6777d908726d75962e5224f98d7f619bb39515dd64b9a56043a" {
 		t.Fatal("wrong address:", uc_address.String())
 	}
 
 	uc_inside_threshold_address := policy.Address()
-	if uc_inside_threshold_address.String() != "addr:1498a58c843ce66740e52421632d67a0f6991ea96db1fc97c29e46f89ae56e3534078876331d" {
+	if uc_inside_threshold_address.String() != "1498a58c843ce66740e52421632d67a0f6991ea96db1fc97c29e46f89ae56e3534078876331d" {
 		t.Fatal("wrong address:", uc_inside_threshold_address.String())
 	}
 }
