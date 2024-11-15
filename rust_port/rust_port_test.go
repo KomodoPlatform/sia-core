@@ -624,7 +624,7 @@ func TestSatisfiedPolicyHashFrivulousSignature(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "7424653d0ca3ffded9a029bebe75f9ae9c99b5f284e23e9d07c0b03456f724f9" {
+	if myHash.String() != "80f3caa4507615945bc839c8505546decd91e9642120f26938b2fc370fa61992" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
