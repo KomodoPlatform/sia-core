@@ -464,7 +464,7 @@ func TestStateElementEncodeHash(t *testing.T) {
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_state_element_encode_null_merkle_proof
+// sia-rust/src/tests/transaction.rs test_state_element_encode_null_merkle_proof
 func TestStateElementEncodeHashNullMerkleProof(t *testing.T) {
 	h := NewHasher()
 
@@ -475,7 +475,24 @@ func TestStateElementEncodeHashNullMerkleProof(t *testing.T) {
 	se.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "d69bc48bc797aff93050447aff0a3f7c4d489705378c122cd123841fe7778a3e" {
+	if myHash.String() != "a3865e5e284e12e0ea418e73127db5d1092bfb98ed372ca9a664504816375e1d" {
+		t.Fatal("wrong hash:", myHash.String())
+	}
+}
+
+// sia-rust/src/tests/transaction.rs test_state_element_encode_empty_merkle_proof
+func TestStateElementEncodeHashEmptyMerkleProof(t *testing.T) {
+	h := NewHasher()
+
+	se := StateElement{
+		LeafIndex:   1,
+		MerkleProof: []Hash256{},
+	}
+
+	se.EncodeTo(h.E)
+	myHash := h.Sum()
+
+	if myHash.String() != "a3865e5e284e12e0ea418e73127db5d1092bfb98ed372ca9a664504816375e1d" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
