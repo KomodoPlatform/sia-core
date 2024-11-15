@@ -459,7 +459,7 @@ func TestStateElementEncodeHash(t *testing.T) {
 	se.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "bf6d7b74fb1e15ec4e86332b628a450e387c45b54ea98e57a6da8c9af317e468" {
+	if myHash.String() != "70f868873fcb6196cd54bbb1e9e480188043426d3f7c9dc8fc5a7a536981cef1" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -641,7 +641,7 @@ func TestSatisfiedPolicyHash(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "7424653d0ca3ffded9a029bebe75f9ae9c99b5f284e23e9d07c0b03456f724f9" {
+	if myHash.String() != "80f3caa4507615945bc839c8505546decd91e9642120f26938b2fc370fa61992" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -703,7 +703,7 @@ func TestSatisfiedPolicyUnlockConditionComplex(t *testing.T) {
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_threshold_simple
+// mm2src/coins/sia/transaction.rs test_satisfied_policy_encode_threshold_simple
 func TestSatisfiedPolicyThresholdSimple(t *testing.T) {
 	h := NewHasher()
 
@@ -718,7 +718,7 @@ func TestSatisfiedPolicyThresholdSimple(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "50f4808b0661f56842472aed259136a43ed2bd7d59a88a3be28de9883af4a92d" {
+	if myHash.String() != "2200a1464864cfaea8d312c1f16b5e00b816110896bea32ef7e1ccd43042d312" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -731,7 +731,7 @@ OP_ELSE
         OP_SIZE 20 OP_EQUALVERIFY OP_HASH160 <secret hash> OP_EQUALVERIFY <pubkey1> OP_CHECKSIG
 OP_ENDIF
 */
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_threshold_atomic_swap_success
+// mm2src/coins/sia/transaction.rs test_satisfied_policy_encode_threshold_atomic_swap_success
 func TestSatisfiedPolicyThresholdAtomicSwapSuccess(t *testing.T) {
 	h := NewHasher()
 
@@ -749,7 +749,7 @@ func TestSatisfiedPolicyThresholdAtomicSwapSuccess(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "c835e516bbf76602c897a9160c17bfe0e4a8bc9044f62b3e5e45a381232a2f86" {
+	if myHash.String() != "08852e4ad99f726120028ecd82925b5f55fa441952cfc034a5cf4f09159b9372" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -813,7 +813,7 @@ func TestSiacoinInputEncodeV2(t *testing.T) {
 	vin.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "a8ab11b91ee19ce68f2d608bd4d19212841842f0c50151ae4ccb8e9db68cd6c4" {
+	if myHash.String() != "d31a05b155113a5244f14ae833887fd8b30f555129be126ca4b90592290db24a" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -833,7 +833,6 @@ func TestAttestationEncode(t *testing.T) {
 	}
 
 	attestation.EncodeTo(h.E)
-	println("buf: ", hex.EncodeToString(h.E.Buf()[:h.E.N()]))
 	myHash := h.Sum()
 
 	if myHash.String() != "b28b32c6f91d1b57ab4a9ea9feecca16b35bb8febdee6a0162b22979415f519d" {
@@ -864,6 +863,7 @@ func TestFileContractV2Encode(t *testing.T) {
 	}
 
 	contract := V2FileContract{
+		Capacity:         0,
 		Filesize:         1,
 		FileMerkleRoot:   Hash256{0},
 		ProofHeight:      1,
@@ -882,7 +882,7 @@ func TestFileContractV2Encode(t *testing.T) {
 	contract.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "6171a8d8ec31e06f80d46efbd1aecf2c5a7c344b5f2a2d4f660654b0cb84113c" {
+	if myHash.String() != "e851362bab643dc066b9d3c22c0fa0d67bc7b0cb520c689765e2292f4e7f435e" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -910,6 +910,7 @@ func TestFileContractElementV2Encode(t *testing.T) {
 	}
 
 	contract := V2FileContract{
+		Capacity:         0,
 		Filesize:         1,
 		FileMerkleRoot:   Hash256{0},
 		ProofHeight:      1,
@@ -931,7 +932,7 @@ func TestFileContractElementV2Encode(t *testing.T) {
 	}
 
 	contractElement := V2FileContractElement{
-		ID:             FileContractID{1, 2, 3},
+		ID:             FileContractID{7, 7, 7},
 		StateElement:   stateElement,
 		V2FileContract: contract,
 	}
@@ -939,12 +940,12 @@ func TestFileContractElementV2Encode(t *testing.T) {
 	contractElement.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "4cde411635118b2b7e1b019c659a2327ada53b303da0e46524e604d228fcd039" {
+	if myHash.String() != "3005594b14c1615aadaef2d8558713ebeabfa7d54f1dec671ba67ea8264816e6" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_file_contract_element_v2_encode
+// mm2src/coins/sia/transaction.rs test_file_contract_revision_v2_encode
 func TestFileContractRevisionV2Encode(t *testing.T) {
 	h := NewHasher()
 
@@ -967,6 +968,7 @@ func TestFileContractRevisionV2Encode(t *testing.T) {
 	}
 
 	contract := V2FileContract{
+		Capacity:         0,
 		Filesize:         1,
 		FileMerkleRoot:   Hash256{0},
 		ProofHeight:      1,
@@ -1001,7 +1003,7 @@ func TestFileContractRevisionV2Encode(t *testing.T) {
 	contractRevision.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "22d5d1fd8c2762758f6b6ecf7058d73524ef209ac5a64f160b71ce91677db9a6" {
+	if myHash.String() != "4f23582ec40570345f72adab8cd6249c0167669b78aec9ac7209befefc281f4f" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
