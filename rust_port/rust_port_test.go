@@ -582,7 +582,7 @@ func TestSatisfiedPolicyHashEmpty(t *testing.T) {
 	sp := SatisfiedPolicy{
 		Policy:     PolicyHash(Hash256{0}),
 		Signatures: []Signature{{}},
-		Preimages:  [][]byte{{}}}
+		Preimages:  [][32]byte{{}}}
 
 	sp.EncodeTo(h.E)
 
@@ -606,7 +606,7 @@ func TestSatisfiedPolicyHashFrivulousSignature(t *testing.T) {
 	sp := SatisfiedPolicy{
 		Policy:     PolicyHash(Hash256{0}),
 		Signatures: []Signature{signature},
-		Preimages:  [][]byte{{1, 2, 3, 4}}}
+		Preimages:  [][32]byte{{1, 2, 3, 4}}}
 
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
@@ -623,7 +623,7 @@ func TestSatisfiedPolicyHash(t *testing.T) {
 	sp := SatisfiedPolicy{
 		Policy:     PolicyHash(Hash256{0}),
 		Signatures: []Signature{{}},
-		Preimages:  [][]byte{{1, 2, 3, 4}}}
+		Preimages:  [][32]byte{{1, 2, 3, 4}}}
 
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
@@ -647,7 +647,7 @@ func TestSatisfiedPolicyUnlockConditionStandard(t *testing.T) {
 	sp := SatisfiedPolicy{
 		Policy:     policy,
 		Signatures: []Signature{signature},
-		Preimages:  [][]byte{}}
+		Preimages:  [][32]byte{}}
 
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
@@ -680,7 +680,7 @@ func TestSatisfiedPolicyUnlockConditionComplex(t *testing.T) {
 	sp := SatisfiedPolicy{
 		Policy:     policy,
 		Signatures: []Signature{sig0, sig1, sig2},
-		Preimages:  [][]byte{}}
+		Preimages:  [][32]byte{}}
 
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
@@ -700,7 +700,7 @@ func TestSatisfiedPolicyThresholdSimple(t *testing.T) {
 	sp := SatisfiedPolicy{
 		Policy:     policy,
 		Signatures: []Signature{{}},
-		Preimages:  [][]byte{{1, 2, 3, 4}}}
+		Preimages:  [][32]byte{{1, 2, 3, 4}}}
 
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
@@ -731,7 +731,7 @@ func TestSatisfiedPolicyThresholdAtomicSwapSuccess(t *testing.T) {
 	sp := SatisfiedPolicy{
 		Policy:     policy,
 		Signatures: []Signature{signature},
-		Preimages:  [][]byte{{1, 2, 3, 4}}}
+		Preimages:  [][32]byte{{1, 2, 3, 4}}}
 
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
@@ -755,7 +755,7 @@ func TestSatisfiedPolicyThresholdAtomicSwapRefund(t *testing.T) {
 	sp := SatisfiedPolicy{
 		Policy:     policy,
 		Signatures: []Signature{signature},
-		Preimages:  [][]byte{{1, 2, 3, 4}}}
+		Preimages:  [][32]byte{{1, 2, 3, 4}}}
 
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
@@ -775,7 +775,7 @@ func TestSiacoinInputEncodeV2(t *testing.T) {
 
 	satisfiedPolicy := SatisfiedPolicy{
 		Policy:    policy,
-		Preimages: [][]byte{{1, 2, 3, 4}},
+		Preimages: [][32]byte{{1, 2, 3, 4}},
 	}
 
 	stateElement := StateElement{
