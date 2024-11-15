@@ -60,7 +60,7 @@ func TestUnlockConditions1of2Multisig(t *testing.T) {
 func TestEncoderDefault(t *testing.T) {
 	h := NewHasher()
 	myHash := h.Sum()
-	if myHash.String() != "h:0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8" {
+	if myHash.String() != "0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -70,7 +70,7 @@ func TestEncoderWriteByes(t *testing.T) {
 	h := NewHasher()
 	h.E.WriteBytes([]byte{1, 2, 3, 4})
 	myHash := h.Sum()
-	if myHash.String() != "h:d4a72b52e2e1f40e20ee40ea6d5080a1b1f76164786defbb7691a4427f3388f5" {
+	if myHash.String() != "d4a72b52e2e1f40e20ee40ea6d5080a1b1f76164786defbb7691a4427f3388f5" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -80,7 +80,7 @@ func TestEncoderWriteUint8(t *testing.T) {
 	h := NewHasher()
 	h.E.WriteUint8(1)
 	myHash := h.Sum()
-	if myHash.String() != "h:ee155ace9c40292074cb6aff8c9ccdd273c81648ff1149ef36bcea6ebb8a3e25" {
+	if myHash.String() != "ee155ace9c40292074cb6aff8c9ccdd273c81648ff1149ef36bcea6ebb8a3e25" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -90,7 +90,7 @@ func TestEncoderWriteUint64(t *testing.T) {
 	h := NewHasher()
 	h.E.WriteUint64(1)
 	myHash := h.Sum()
-	if myHash.String() != "h:1dbd7d0b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190c37c363b" {
+	if myHash.String() != "1dbd7d0b561a41d23c2a469ad42fbd70d5438bae826f6fd607413190c37c363b" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -100,7 +100,7 @@ func TestEncoderWriteDistinguisher(t *testing.T) {
 	h := NewHasher()
 	h.WriteDistinguisher("test")
 	myHash := h.Sum()
-	if myHash.String() != "h:25fb524721bf98a9a1233a53c40e7e198971b003bf23c24f59d547a1bb837f9c" {
+	if myHash.String() != "25fb524721bf98a9a1233a53c40e7e198971b003bf23c24f59d547a1bb837f9c" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -110,7 +110,7 @@ func TestEmcoderWriteBool(t *testing.T) {
 	h := NewHasher()
 	h.E.WriteBool(true)
 	myHash := h.Sum()
-	if myHash.String() != "h:ee155ace9c40292074cb6aff8c9ccdd273c81648ff1149ef36bcea6ebb8a3e25" {
+	if myHash.String() != "ee155ace9c40292074cb6aff8c9ccdd273c81648ff1149ef36bcea6ebb8a3e25" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -120,13 +120,13 @@ func TestReset(t *testing.T) {
 	h := NewHasher()
 	h.E.WriteBool(true)
 	myHash := h.Sum()
-	if myHash.String() != "h:ee155ace9c40292074cb6aff8c9ccdd273c81648ff1149ef36bcea6ebb8a3e25" {
+	if myHash.String() != "ee155ace9c40292074cb6aff8c9ccdd273c81648ff1149ef36bcea6ebb8a3e25" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 	h.Reset()
 	h.E.WriteBool(false)
 	myHash = h.Sum()
-	if myHash.String() != "h:03170a2e7597b7b7e3d84c05391d139a62b157e78786d8c082f29dcf4c111314" {
+	if myHash.String() != "03170a2e7597b7b7e3d84c05391d139a62b157e78786d8c082f29dcf4c111314" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -139,7 +139,7 @@ func TestEncoderWriteComplex(t *testing.T) {
 	h.E.WriteUint8(1)
 	h.E.WriteBytes([]byte{1, 2, 3, 4})
 	myHash := h.Sum()
-	if myHash.String() != "h:b66d7a9bef9fb303fe0e41f6b5c5af410303e428c4ff9231f6eb381248693221" {
+	if myHash.String() != "b66d7a9bef9fb303fe0e41f6b5c5af410303e428c4ff9231f6eb381248693221" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -153,7 +153,7 @@ func TestPolicyAboveEncodeHash(t *testing.T) {
 
 	myaddress := policy.Address()
 	myHash := h.Sum()
-	if myHash.String() != "h:bebf6cbdfb440a92e3e5d832ac30fe5d226ff6b352ed3a9398b7d35f086a8ab6" {
+	if myHash.String() != "bebf6cbdfb440a92e3e5d832ac30fe5d226ff6b352ed3a9398b7d35f086a8ab6" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 	if myaddress.String() != "188b997bb99dee13e95f92c3ea150bd76b3ec72e5ba57b0d57439a1a6e2865e9b25ea5d1825e" {
@@ -172,7 +172,7 @@ func TestPolicyAfterEncodeHash(t *testing.T) {
 	myHash := h.Sum()
 	myaddress := policy.Address()
 
-	if myHash.String() != "h:07b0f28eafd87a082ad11dc4724e1c491821260821a30bec68254444f97d9311" {
+	if myHash.String() != "07b0f28eafd87a082ad11dc4724e1c491821260821a30bec68254444f97d9311" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 	if myaddress.String() != "60c74e0ce5cede0f13f83b0132cb195c995bc7688c9fac34bbf2b14e14394b8bbe2991bc017f" {
@@ -190,7 +190,7 @@ func TestPolicyPublicKeyEncodeHash(t *testing.T) {
 	myHash := h.Sum()
 	myaddress := policy.Address()
 
-	if myHash.String() != "h:4355c8f80f6e5a98b70c9c2f9a22f17747989b4744783c90439b2b034f698bfe" {
+	if myHash.String() != "4355c8f80f6e5a98b70c9c2f9a22f17747989b4744783c90439b2b034f698bfe" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 	if myaddress.String() != "55a7793237722c6df8222fd512063cb74228085ef1805c5184713648c159b919ac792fbad0e1" {
@@ -208,7 +208,7 @@ func TestPolicyHash(t *testing.T) {
 	myHash := h.Sum()
 	myaddress := policy.Address()
 
-	if myHash.String() != "h:9938967aefa6cbecc1f1620d2df5170d6811d4b2f47a879b621c1099a3b0628a" {
+	if myHash.String() != "9938967aefa6cbecc1f1620d2df5170d6811d4b2f47a879b621c1099a3b0628a" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 	if myaddress.String() != "a4d5a06d8d3c2e45aa26627858ce8e881505ae3c9d122a1d282c7824163751936cffb347e435" {
@@ -229,7 +229,7 @@ func TestPolicyThreshold(t *testing.T) {
 	myHash := h.Sum()
 	myaddress := policy.Address()
 
-	if myHash.String() != "h:7d792df6cd0b5e0f795287b3bf4087bbcc4c1bd0c52880a552cdda3e5e33d802" {
+	if myHash.String() != "7d792df6cd0b5e0f795287b3bf4087bbcc4c1bd0c52880a552cdda3e5e33d802" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 	if myaddress.String() != "4179b53aba165e46e4c85b3c8766bb758fb6f0bfa5721550b81981a3ec38efc460557dc1ded4" {
@@ -283,7 +283,7 @@ func TestSiacoinInputEncodeHash(t *testing.T) {
 	vin.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:1d4b77aaa82c71ca68843210679b380f9638f8bec7addf0af16a6536dd54d6b4" {
+	if myHash.String() != "1d4b77aaa82c71ca68843210679b380f9638f8bec7addf0af16a6536dd54d6b4" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -298,7 +298,7 @@ func TestSiacoinAddressEncodeHash(t *testing.T) {
 	addr.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:d64b9a56043a909494f07520915e10dae62d75dba24b17c8414f8f3f30c53425" {
+	if myHash.String() != "d64b9a56043a909494f07520915e10dae62d75dba24b17c8414f8f3f30c53425" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -319,7 +319,7 @@ func TestSiacoinUnlockConditionEncodeHash(t *testing.T) {
 
 	myHash := h.Sum()
 
-	if myHash.String() != "h:5d49bae37b97c86573a1525246270c180464acf33d63cc2ac0269ef9a8cb9d98" {
+	if myHash.String() != "5d49bae37b97c86573a1525246270c180464acf33d63cc2ac0269ef9a8cb9d98" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -333,7 +333,7 @@ func TestSiacoinPublicKeyEncodeHash(t *testing.T) {
 
 	myHash := h.Sum()
 
-	if myHash.String() != "h:d487326614f066416308bf6aa4e5041d1949928e4b26ede98e3cebb36a3b1726" {
+	if myHash.String() != "d487326614f066416308bf6aa4e5041d1949928e4b26ede98e3cebb36a3b1726" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -346,7 +346,7 @@ func TestSiacoinCurrencyEncodeHashV1(t *testing.T) {
 	V1Currency(currency).EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:a1cc3a97fc1ebfa23b0b128b153a29ad9f918585d1d8a32354f547d8451b7826" {
+	if myHash.String() != "a1cc3a97fc1ebfa23b0b128b153a29ad9f918585d1d8a32354f547d8451b7826" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -359,7 +359,7 @@ func TestSiacoinCurrencyEncodeHashV2(t *testing.T) {
 	V2Currency(currency).EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:a3865e5e284e12e0ea418e73127db5d1092bfb98ed372ca9a664504816375e1d" {
+	if myHash.String() != "a3865e5e284e12e0ea418e73127db5d1092bfb98ed372ca9a664504816375e1d" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -372,7 +372,7 @@ func TestSiacoinCurrencyEncodeHashV1Max(t *testing.T) {
 	V1Currency(currency).EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:4b9ed7269cb15f71ddf7238172a593a8e7ffe68b12c1bf73d67ac8eec44355bb" {
+	if myHash.String() != "4b9ed7269cb15f71ddf7238172a593a8e7ffe68b12c1bf73d67ac8eec44355bb" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -385,7 +385,7 @@ func TestSiacoinCurrencyEncodeHashV2Max(t *testing.T) {
 	V2Currency(currency).EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:681467b3337425fd38fa3983531ca1a6214de9264eebabdf9c9bc5d157d202b4" {
+	if myHash.String() != "681467b3337425fd38fa3983531ca1a6214de9264eebabdf9c9bc5d157d202b4" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -402,7 +402,7 @@ func TestSiacoinOutputEncodeHashV1(t *testing.T) {
 	V1SiacoinOutput(vout).EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:3253c57e76600721f2bdf03497a71ed47c09981e22ef49aed92e40da1ea91b28" {
+	if myHash.String() != "3253c57e76600721f2bdf03497a71ed47c09981e22ef49aed92e40da1ea91b28" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -419,7 +419,7 @@ func TestSiacoinOutputEncodeHashV2(t *testing.T) {
 	V2SiacoinOutput(vout).EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:c278eceae42f594f5f4ca52c8a84b749146d08af214cc959ed2aaaa916eaafd3" {
+	if myHash.String() != "c278eceae42f594f5f4ca52c8a84b749146d08af214cc959ed2aaaa916eaafd3" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -442,7 +442,7 @@ func TestSiacoinInputEncodeHashV1(t *testing.T) {
 	vin.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:2f806f905436dc7c5079ad8062467266e225d8110a3c58d17628d609cb1c99d0" {
+	if myHash.String() != "2f806f905436dc7c5079ad8062467266e225d8110a3c58d17628d609cb1c99d0" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -459,7 +459,7 @@ func TestStateElementEncodeHash(t *testing.T) {
 	se.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:bf6d7b74fb1e15ec4e86332b628a450e387c45b54ea98e57a6da8c9af317e468" {
+	if myHash.String() != "bf6d7b74fb1e15ec4e86332b628a450e387c45b54ea98e57a6da8c9af317e468" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -475,7 +475,7 @@ func TestStateElementEncodeHashNullMerkleProof(t *testing.T) {
 	se.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:d69bc48bc797aff93050447aff0a3f7c4d489705378c122cd123841fe7778a3e" {
+	if myHash.String() != "d69bc48bc797aff93050447aff0a3f7c4d489705378c122cd123841fe7778a3e" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -504,7 +504,7 @@ func TestSiacoinElementEncodeHash(t *testing.T) {
 	siacoinElement.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:3c867a54b7b3de349c56585f25a4365f31d632c3e42561b615055c77464d889e" {
+	if myHash.String() != "3c867a54b7b3de349c56585f25a4365f31d632c3e42561b615055c77464d889e" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -522,7 +522,7 @@ func TestSignatureEncodeHash(t *testing.T) {
 	signature.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:1e6952fe04eb626ae759a0090af2e701ba35ee6ad15233a2e947cb0f7ae9f7c7" {
+	if myHash.String() != "1e6952fe04eb626ae759a0090af2e701ba35ee6ad15233a2e947cb0f7ae9f7c7" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -568,7 +568,7 @@ func TestSatisfiedPolicyPublicKey(t *testing.T) {
 
 	myHash := h.Sum()
 
-	if myHash.String() != "h:51832be911c7382502a2011cbddf1a9f689c4ca08c6a83ae3d021fb0dc781822" {
+	if myHash.String() != "51832be911c7382502a2011cbddf1a9f689c4ca08c6a83ae3d021fb0dc781822" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -586,7 +586,7 @@ func TestSatisfiedPolicyHashEmpty(t *testing.T) {
 
 	myHash := h.Sum()
 
-	if myHash.String() != "h:1e612d1ee36338b93a36bac0c52007a2d678cde0bd9b95c36a1f61166cf02b87" {
+	if myHash.String() != "1e612d1ee36338b93a36bac0c52007a2d678cde0bd9b95c36a1f61166cf02b87" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -607,7 +607,7 @@ func TestSatisfiedPolicyHashFrivulousSignature(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:7424653d0ca3ffded9a029bebe75f9ae9c99b5f284e23e9d07c0b03456f724f9" {
+	if myHash.String() != "7424653d0ca3ffded9a029bebe75f9ae9c99b5f284e23e9d07c0b03456f724f9" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -624,7 +624,7 @@ func TestSatisfiedPolicyHash(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:7424653d0ca3ffded9a029bebe75f9ae9c99b5f284e23e9d07c0b03456f724f9" {
+	if myHash.String() != "7424653d0ca3ffded9a029bebe75f9ae9c99b5f284e23e9d07c0b03456f724f9" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -648,7 +648,7 @@ func TestSatisfiedPolicyUnlockConditionStandard(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:c749f9ac53395ec557aed7e21d202f76a58e0de79222e5756b27077e9295931f" {
+	if myHash.String() != "c749f9ac53395ec557aed7e21d202f76a58e0de79222e5756b27077e9295931f" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -681,7 +681,7 @@ func TestSatisfiedPolicyUnlockConditionComplex(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:13806b6c13a97478e476e0e5a0469c9d0ad8bf286bec0ada992e363e9fc60901" {
+	if myHash.String() != "13806b6c13a97478e476e0e5a0469c9d0ad8bf286bec0ada992e363e9fc60901" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -701,7 +701,7 @@ func TestSatisfiedPolicyThresholdSimple(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:50f4808b0661f56842472aed259136a43ed2bd7d59a88a3be28de9883af4a92d" {
+	if myHash.String() != "50f4808b0661f56842472aed259136a43ed2bd7d59a88a3be28de9883af4a92d" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -732,7 +732,7 @@ func TestSatisfiedPolicyThresholdAtomicSwapSuccess(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:c835e516bbf76602c897a9160c17bfe0e4a8bc9044f62b3e5e45a381232a2f86" {
+	if myHash.String() != "c835e516bbf76602c897a9160c17bfe0e4a8bc9044f62b3e5e45a381232a2f86" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -756,7 +756,7 @@ func TestSatisfiedPolicyThresholdAtomicSwapRefund(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:8975e8cf990d5a20d9ec3dae18ed3b3a0c92edf967a8d93fcdef6a1eb73bb348" {
+	if myHash.String() != "8975e8cf990d5a20d9ec3dae18ed3b3a0c92edf967a8d93fcdef6a1eb73bb348" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -796,7 +796,7 @@ func TestSiacoinInputEncodeV2(t *testing.T) {
 	vin.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:a8ab11b91ee19ce68f2d608bd4d19212841842f0c50151ae4ccb8e9db68cd6c4" {
+	if myHash.String() != "a8ab11b91ee19ce68f2d608bd4d19212841842f0c50151ae4ccb8e9db68cd6c4" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -819,7 +819,7 @@ func TestAttestationEncode(t *testing.T) {
 	println("buf: ", hex.EncodeToString(h.E.Buf()[:h.E.N()]))
 	myHash := h.Sum()
 
-	if myHash.String() != "h:b28b32c6f91d1b57ab4a9ea9feecca16b35bb8febdee6a0162b22979415f519d" {
+	if myHash.String() != "b28b32c6f91d1b57ab4a9ea9feecca16b35bb8febdee6a0162b22979415f519d" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -865,7 +865,7 @@ func TestFileContractV2Encode(t *testing.T) {
 	contract.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:6171a8d8ec31e06f80d46efbd1aecf2c5a7c344b5f2a2d4f660654b0cb84113c" {
+	if myHash.String() != "6171a8d8ec31e06f80d46efbd1aecf2c5a7c344b5f2a2d4f660654b0cb84113c" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -922,7 +922,7 @@ func TestFileContractElementV2Encode(t *testing.T) {
 	contractElement.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:4cde411635118b2b7e1b019c659a2327ada53b303da0e46524e604d228fcd039" {
+	if myHash.String() != "4cde411635118b2b7e1b019c659a2327ada53b303da0e46524e604d228fcd039" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -984,7 +984,7 @@ func TestFileContractRevisionV2Encode(t *testing.T) {
 	contractRevision.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "h:22d5d1fd8c2762758f6b6ecf7058d73524ef209ac5a64f160b71ce91677db9a6" {
+	if myHash.String() != "22d5d1fd8c2762758f6b6ecf7058d73524ef209ac5a64f160b71ce91677db9a6" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
