@@ -595,29 +595,10 @@ func (p SpendPolicy) EncodeTo(e *Encoder) {
 // EncodeTo implements types.EncoderTo.
 func (sp SatisfiedPolicy) EncodeTo(e *Encoder) {
 	sp.Policy.EncodeTo(e)
-	var sigi, prei int
-	var rec func(SpendPolicy)
-	rec = func(p SpendPolicy) {
-		switch p := p.Type.(type) {
-		case PolicyTypePublicKey:
-			sp.Signatures[sigi].EncodeTo(e)
-			sigi++
-		case PolicyTypeHash:
-			e.Write(sp.Preimages[prei][:])
-			prei++
-		case PolicyTypeThreshold:
-			for i := range p.Of {
-				rec(p.Of[i])
-			}
-		case PolicyTypeUnlockConditions:
-			for i := range p.PublicKeys {
-				rec(PolicyPublicKey(*(*PublicKey)(p.PublicKeys[i].Key)))
-			}
-		default:
-			// nothing to do
-		}
-	}
-	rec(sp.Policy)
+	EncodeSlice(e, sp.Signatures)
+	EncodeSliceFn(e, sp.Preimages, func(e *Encoder, pre [32]byte) {
+		Hash256(pre).EncodeTo(e)
+	})
 }
 
 // EncodeTo implements types.EncoderTo.
@@ -711,11 +692,6 @@ func (ren V2FileContractRenewal) EncodeTo(e *Encoder) {
 }
 
 // EncodeTo implements types.EncoderTo.
-func (fcf V2FileContractFinalization) EncodeTo(e *Encoder) {
-	Signature(fcf).EncodeTo(e)
-}
-
-// EncodeTo implements types.EncoderTo.
 func (sp V2StorageProof) EncodeTo(e *Encoder) {
 	sp.ProofIndex.EncodeTo(e)
 	e.Write(sp.Leaf[:])
@@ -733,10 +709,8 @@ func (res V2FileContractResolution) EncodeTo(e *Encoder) {
 		e.WriteUint8(0)
 	case *V2StorageProof:
 		e.WriteUint8(1)
-	case *V2FileContractFinalization:
-		e.WriteUint8(2)
 	case *V2FileContractExpiration:
-		e.WriteUint8(3)
+		e.WriteUint8(2)
 	default:
 		panic(fmt.Sprintf("unhandled resolution type %T", r))
 	}
@@ -855,10 +829,6 @@ func (txn V2TransactionSemantics) EncodeTo(e *Encoder) {
 		fcr.Parent.ID.EncodeTo(e)
 		// normalize (being careful not to modify the original)
 		switch res := fcr.Resolution.(type) {
-		case *V2FileContractFinalization:
-			fcf := *res
-			nilSigs((*Signature)(&fcf))
-			fcr.Resolution = &fcf
 		case *V2FileContractRenewal:
 			renewal := *res
 			nilSigs(
@@ -1184,43 +1154,11 @@ func (p *SpendPolicy) DecodeFrom(d *Decoder) {
 // DecodeFrom implements types.DecoderFrom.
 func (sp *SatisfiedPolicy) DecodeFrom(d *Decoder) {
 	sp.Policy.DecodeFrom(d)
-	// if policy decoding fails, the code below (namely the array cast) may
-	// panic, so abort early
-	if d.Err() != nil {
+	DecodeSlice(d, &sp.Signatures)
+	DecodeSliceFn(d, &sp.Preimages, func(d *Decoder) (pre [32]byte) {
+		(*Hash256)(&pre).DecodeFrom(d)
 		return
-	}
-
-	var rec func(SpendPolicy)
-	rec = func(p SpendPolicy) {
-		switch p := p.Type.(type) {
-		case PolicyTypePublicKey:
-			var s Signature
-			s.DecodeFrom(d)
-			sp.Signatures = append(sp.Signatures, s)
-		case PolicyTypeHash:
-			var pre [32]byte
-			d.Read(pre[:])
-			sp.Preimages = append(sp.Preimages, pre)
-		case PolicyTypeThreshold:
-			for i := range p.Of {
-				rec(p.Of[i])
-			}
-		case PolicyTypeUnlockConditions:
-			for _, uk := range p.PublicKeys {
-				if len(uk.Key) != 32 {
-					d.SetErr(fmt.Errorf("invalid public key length: %d", len(uk.Key)))
-					return
-				} else if uk.Algorithm != SpecifierEd25519 {
-					d.SetErr(fmt.Errorf("invalid specifier: %v", uk.Algorithm))
-					return
-				}
-				rec(PolicyPublicKey(*(*PublicKey)(uk.Key)))
-			}
-		default:
-			// nothing to do
-		}
-	}
-	rec(sp.Policy)
+	})
 }
 
 // DecodeFrom implements types.DecoderFrom.
@@ -1314,11 +1252,6 @@ func (ren *V2FileContractRenewal) DecodeFrom(d *Decoder) {
 }
 
 // DecodeFrom implements types.DecoderFrom.
-func (fcf *V2FileContractFinalization) DecodeFrom(d *Decoder) {
-	(*Signature)(fcf).DecodeFrom(d)
-}
-
-// DecodeFrom implements types.DecoderFrom.
 func (sp *V2StorageProof) DecodeFrom(d *Decoder) {
 	sp.ProofIndex.DecodeFrom(d)
 	d.Read(sp.Leaf[:])
@@ -1337,8 +1270,6 @@ func (res *V2FileContractResolution) DecodeFrom(d *Decoder) {
 	case 1:
 		res.Resolution = new(V2StorageProof)
 	case 2:
-		res.Resolution = new(V2FileContractFinalization)
-	case 3:
 		res.Resolution = new(V2FileContractExpiration)
 	default:
 		d.SetErr(fmt.Errorf("unknown resolution type %d", t))

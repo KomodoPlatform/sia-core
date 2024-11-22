@@ -16,6 +16,15 @@ const (
 	// the contract expires.
 	ProofWindow = 144 // 24 hours
 
+	// TempSectorDuration is the number of blocks that temp sectors are expected to be stored
+	// before being removed
+	TempSectorDuration = 144 * 3
+
+	// MaxSectorBatchSize is the number of sector operations that can be batched into a single RPC.
+	// For example, the number of sectors appended to a contract within a single RPC append call or the
+	// number of sectors removed in a single RPC free call.
+	MaxSectorBatchSize = (1 << 40) / (SectorSize)
+
 	// SectorSize is the size of one sector in bytes.
 	SectorSize = 1 << 22 // 4 MiB
 )
@@ -97,10 +106,10 @@ func (hp HostPrices) RPCReadSectorCost(length uint64) Usage {
 }
 
 // RPCWriteSectorCost returns the cost of executing the WriteSector RPC with the
-// given sector length and duration.
-func (hp HostPrices) RPCWriteSectorCost(sectorLength uint64, duration uint64) Usage {
+// given sector length.
+func (hp HostPrices) RPCWriteSectorCost(sectorLength uint64) Usage {
 	return Usage{
-		Storage: hp.StoragePrice.Mul64(SectorSize).Mul64(duration),
+		Storage: hp.StoragePrice.Mul64(SectorSize).Mul64(TempSectorDuration),
 		Ingress: hp.IngressPrice.Mul64(round4KiB(sectorLength)),
 	}
 }
@@ -171,8 +180,6 @@ type HostSettings struct {
 	AcceptingContracts  bool           `json:"acceptingContracts"`
 	MaxCollateral       types.Currency `json:"maxCollateral"`
 	MaxContractDuration uint64         `json:"maxContractDuration"`
-	MaxSectorDuration   uint64         `json:"maxSectorDuration"`
-	MaxSectorBatchSize  uint64         `json:"maxSectorBatchSize"`
 	RemainingStorage    uint64         `json:"remainingStorage"`
 	TotalStorage        uint64         `json:"totalStorage"`
 	Prices              HostPrices     `json:"prices"`
