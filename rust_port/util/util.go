@@ -2,6 +2,8 @@ package rust_port_util
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	. "go.sia.tech/core/types"
@@ -51,4 +53,9 @@ func SpendPolicyAtomicSwapRefund(alice PublicKey, bob PublicKey, lockTime uint64
 	policy_refund := PolicyThreshold(2, []SpendPolicy{PolicyPublicKey(bob), policy_after})
 
 	return PolicyThreshold(1, []SpendPolicy{PolicyOpaque(policy_success), policy_refund})
+}
+
+func PrintJSON(input any) {
+	jsonData, _ := json.Marshal(input)
+	fmt.Println(string(jsonData))
 }
