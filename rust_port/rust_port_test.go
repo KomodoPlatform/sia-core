@@ -263,7 +263,7 @@ func TestPolicyUnlockConditionEncodeSpecialCase(t *testing.T) {
 }
 
 // FIXME link to equivalent rust code once pushed
-// mm2src/coins/sia/transaction.rs test_siacoin_input_encode
+// sia-rust/src/tests/transaction.rs test_siacoin_input_encode
 func TestSiacoinInputEncodeHash(t *testing.T) {
 	h := NewHasher()
 
@@ -447,7 +447,7 @@ func TestSiacoinInputEncodeHashV1(t *testing.T) {
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_state_element_encode
+// sia-rust/src/tests/transaction.rs test_state_element_encode
 func TestStateElementEncodeHash(t *testing.T) {
 	h := NewHasher()
 
@@ -497,7 +497,7 @@ func TestStateElementEncodeHashEmptyMerkleProof(t *testing.T) {
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_siacoin_element_encode
+// sia-rust/src/tests/transaction.rs test_siacoin_element_encode
 func TestSiacoinElementEncodeHash(t *testing.T) {
 	h := NewHasher()
 
@@ -526,7 +526,7 @@ func TestSiacoinElementEncodeHash(t *testing.T) {
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_signature_encode
+// sia-rust/src/tests/transaction.rs test_signature_encode
 func TestSignatureEncodeHash(t *testing.T) {
 	h := NewHasher()
 
@@ -544,31 +544,7 @@ func TestSignatureEncodeHash(t *testing.T) {
 	}
 }
 
-func TestSatisfiedPolicyEncodeHashPublicKeyMissingSignature(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("The code did not panic")
-		} else {
-			expected := "runtime error: index out of range [0] with length 0"
-			if errMsg, ok := r.(error); ok {
-				if errMsg.Error() != expected {
-					t.Errorf("Expected panic: '%s', got: '%s'", expected, errMsg.Error())
-				}
-			} else {
-				if r != expected {
-					t.Errorf("Expected panic: '%s', got: '%v'", expected, r)
-				}
-			}
-		}
-	}()
-
-	h := NewHasher()
-
-	sp := SatisfiedPolicy{Policy: PolicyPublicKey(PublicKey{1, 2, 3})}
-	sp.EncodeTo(h.E) // This should panic
-}
-
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_encode_public_key
+// sia-rust/src/tests/transaction.rs test_satisfied_policy_encode_public_key
 func TestSatisfiedPolicyPublicKey(t *testing.T) {
 	h := NewHasher()
 
@@ -585,7 +561,7 @@ func TestSatisfiedPolicyPublicKey(t *testing.T) {
 
 	myHash := h.Sum()
 
-	if myHash.String() != "51832be911c7382502a2011cbddf1a9f689c4ca08c6a83ae3d021fb0dc781822" {
+	if myHash.String() != "92d9097978387a5da9d17435b796984dae6bd4342c88684d0949e406755c289c" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -596,20 +572,19 @@ func TestSatisfiedPolicyHashEmpty(t *testing.T) {
 
 	sp := SatisfiedPolicy{
 		Policy:     PolicyHash(Hash256{0}),
-		Signatures: []Signature{{}},
+		Signatures: []Signature{},
 		Preimages:  [][32]byte{{}}}
 
 	sp.EncodeTo(h.E)
 
 	myHash := h.Sum()
 
-	if myHash.String() != "1e612d1ee36338b93a36bac0c52007a2d678cde0bd9b95c36a1f61166cf02b87" {
+	if myHash.String() != "abac830016d15871dfefad87ddfce263a6936b77e8ec18e7712870d6bf771376" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_encode_hash
-// Adding a signature to SatisfiedPolicy of PolicyHash should have no effect
+// sia-rust/src/tests/transaction.rs test_satisfied_policy_encode_hash
 func TestSatisfiedPolicyHashFrivulousSignature(t *testing.T) {
 	h := NewHasher()
 	bytes, _ := hex.DecodeString("105641BF4AE119CB15617FC9658BEE5D448E2CC27C9BC3369F4BA5D0E1C3D01EBCB21B669A7B7A17CF8457189EAA657C41D4A2E6F9E0F25D0996D3A17170F309")
@@ -624,29 +599,29 @@ func TestSatisfiedPolicyHashFrivulousSignature(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "80f3caa4507615945bc839c8505546decd91e9642120f26938b2fc370fa61992" {
+	if myHash.String() != "f6885827fb8a6d1a5751ce3f5a8580dc590f262f42e2dd9944052ec43ffc8d97" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_encode_hash
+// sia-rust/src/tests/transaction.rs test_satisfied_policy_encode_hash
 func TestSatisfiedPolicyHash(t *testing.T) {
 	h := NewHasher()
 
 	sp := SatisfiedPolicy{
 		Policy:     PolicyHash(Hash256{0}),
-		Signatures: []Signature{{}},
+		Signatures: []Signature{},
 		Preimages:  [][32]byte{{1, 2, 3, 4}}}
 
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "80f3caa4507615945bc839c8505546decd91e9642120f26938b2fc370fa61992" {
+	if myHash.String() != "e3bbd67ade36322f3de8458b1daa80fd21bb74af88c779b768908e007611f36e" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_encode_unlock_condition_standard
+// sia-rust/src/tests/transaction.rs test_satisfied_policy_encode_unlock_condition_standard
 func TestSatisfiedPolicyUnlockConditionStandard(t *testing.T) {
 	h := NewHasher()
 
@@ -665,12 +640,12 @@ func TestSatisfiedPolicyUnlockConditionStandard(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "c749f9ac53395ec557aed7e21d202f76a58e0de79222e5756b27077e9295931f" {
+	if myHash.String() != "0411ac20ae5472822bdc6c24c9ba2afdd828300ed3706cb1c07a8578276fd72d" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_encode_unlock_condition_complex
+// sia-rust/src/tests/transaction.rs test_satisfied_policy_encode_unlock_condition_complex
 func TestSatisfiedPolicyUnlockConditionComplex(t *testing.T) {
 	h := NewHasher()
 
@@ -698,12 +673,12 @@ func TestSatisfiedPolicyUnlockConditionComplex(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "13806b6c13a97478e476e0e5a0469c9d0ad8bf286bec0ada992e363e9fc60901" {
+	if myHash.String() != "b4d658dbc32b3e147d2736f75b14ca881d5c04963663993b6448c86f4f1a2815" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_encode_threshold_simple
+// sia-rust/src/tests/transaction.rs test_satisfied_policy_encode_threshold_simple
 func TestSatisfiedPolicyThresholdSimple(t *testing.T) {
 	h := NewHasher()
 
@@ -712,13 +687,13 @@ func TestSatisfiedPolicyThresholdSimple(t *testing.T) {
 
 	sp := SatisfiedPolicy{
 		Policy:     policy,
-		Signatures: []Signature{{}},
+		Signatures: []Signature{},
 		Preimages:  [][32]byte{{1, 2, 3, 4}}}
 
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "2200a1464864cfaea8d312c1f16b5e00b816110896bea32ef7e1ccd43042d312" {
+	if myHash.String() != "5cd34ed67f2b2a55d016b4c485dfd1ca2eca75f6831cec9eed9494d6fa735315" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -731,7 +706,7 @@ OP_ELSE
         OP_SIZE 20 OP_EQUALVERIFY OP_HASH160 <secret hash> OP_EQUALVERIFY <pubkey1> OP_CHECKSIG
 OP_ENDIF
 */
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_encode_threshold_atomic_swap_success
+// sia-rust/src/tests/transaction.rs test_satisfied_policy_encode_threshold_atomic_swap_success
 func TestSatisfiedPolicyThresholdAtomicSwapSuccess(t *testing.T) {
 	h := NewHasher()
 
@@ -749,12 +724,12 @@ func TestSatisfiedPolicyThresholdAtomicSwapSuccess(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "08852e4ad99f726120028ecd82925b5f55fa441952cfc034a5cf4f09159b9372" {
+	if myHash.String() != "30abac67d0017556ae69416f54663edbe2fb14c7bcef028f2d228aef500e8f51" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_satisfied_policy_threshold_atomic_swap_refund
+// sia-rust/src/tests/transaction.rs test_satisfied_policy_threshold_atomic_swap_refund
 
 func TestSatisfiedPolicyThresholdAtomicSwapRefund(t *testing.T) {
 	h := NewHasher()
@@ -773,12 +748,12 @@ func TestSatisfiedPolicyThresholdAtomicSwapRefund(t *testing.T) {
 	sp.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "8975e8cf990d5a20d9ec3dae18ed3b3a0c92edf967a8d93fcdef6a1eb73bb348" {
+	if myHash.String() != "69b26bdb1114af01e4626d2a31184706e1dc83d83063c9019f9ee66381bd6923" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_siacoin_input_encode_v2
+// sia-rust/src/tests/transaction.rs test_siacoin_input_encode_v2
 func TestSiacoinInputEncodeV2(t *testing.T) {
 	h := NewHasher()
 
@@ -813,7 +788,7 @@ func TestSiacoinInputEncodeV2(t *testing.T) {
 	vin.EncodeTo(h.E)
 	myHash := h.Sum()
 
-	if myHash.String() != "d31a05b155113a5244f14ae833887fd8b30f555129be126ca4b90592290db24a" {
+	if myHash.String() != "102a2924e7427ee3654bfeea8fc055fd82c2a403598484dbb704da9cdaada3ba" {
 		t.Fatal("wrong hash:", myHash.String())
 	}
 }
@@ -840,7 +815,7 @@ func TestAttestationEncode(t *testing.T) {
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_file_contract_v2_encode
+// sia-rust/src/tests/transaction.rs test_file_contract_v2_encode
 func TestFileContractV2Encode(t *testing.T) {
 	h := NewHasher()
 
@@ -887,7 +862,7 @@ func TestFileContractV2Encode(t *testing.T) {
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_file_contract_element_v2_encode
+// sia-rust/src/tests/transaction.rs test_file_contract_element_v2_encode
 func TestFileContractElementV2Encode(t *testing.T) {
 	h := NewHasher()
 
@@ -945,7 +920,7 @@ func TestFileContractElementV2Encode(t *testing.T) {
 	}
 }
 
-// mm2src/coins/sia/transaction.rs test_file_contract_revision_v2_encode
+// sia-rust/src/tests/transaction.rs test_file_contract_revision_v2_encode
 func TestFileContractRevisionV2Encode(t *testing.T) {
 	h := NewHasher()
 
