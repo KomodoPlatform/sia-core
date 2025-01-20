@@ -367,7 +367,7 @@ func (ms *MidState) addSiafundElement(id types.SiafundOutputID, sfo types.Siafun
 		StateElement:  types.StateElement{LeafIndex: types.UnassignedLeafIndex},
 		ID:            id,
 		SiafundOutput: sfo,
-		ClaimStart:    ms.siafundPool,
+		ClaimStart:    ms.siafundTaxRevenue,
 	}
 	ms.sfes = append(ms.sfes, sfe)
 	ms.created[ms.sfes[len(ms.sfes)-1].ID] = len(ms.sfes) - 1
@@ -389,7 +389,7 @@ func (ms *MidState) addFileContractElement(id types.FileContractID, fc types.Fil
 	}
 	ms.fces = append(ms.fces, fce)
 	ms.created[ms.fces[len(ms.fces)-1].ID] = len(ms.fces) - 1
-	ms.siafundPool = ms.siafundPool.Add(ms.base.FileContractTax(fce.FileContract))
+	ms.siafundTaxRevenue = ms.siafundTaxRevenue.Add(ms.base.FileContractTax(fce.FileContract))
 }
 
 func (ms *MidState) reviseFileContractElement(fce types.FileContractElement, rev types.FileContract) {
@@ -426,7 +426,7 @@ func (ms *MidState) addV2FileContractElement(id types.FileContractID, fc types.V
 	}
 	ms.v2fces = append(ms.v2fces, fce)
 	ms.created[ms.v2fces[len(ms.v2fces)-1].ID] = len(ms.v2fces) - 1
-	ms.siafundPool = ms.siafundPool.Add(ms.base.V2FileContractTax(fce.V2FileContract))
+	ms.siafundTaxRevenue = ms.siafundTaxRevenue.Add(ms.base.V2FileContractTax(fce.V2FileContract))
 }
 
 func (ms *MidState) reviseV2FileContractElement(fce types.V2FileContractElement, rev types.V2FileContract) {
@@ -477,7 +477,7 @@ func (ms *MidState) ApplyTransaction(txn types.Transaction, ts V1TransactionSupp
 		if !ok {
 			panic("missing SiafundElement")
 		}
-		claimPortion := ms.siafundPool.Sub(sfe.ClaimStart).Div64(ms.base.SiafundCount()).Mul64(sfe.SiafundOutput.Value)
+		claimPortion := ms.siafundTaxRevenue.Sub(sfe.ClaimStart).Div64(ms.base.SiafundCount()).Mul64(sfe.SiafundOutput.Value)
 		ms.spendSiafundElement(sfe, txid)
 		ms.addImmatureSiacoinElement(sfi.ParentID.ClaimOutputID(), types.SiacoinOutput{Value: claimPortion, Address: sfi.ClaimAddress})
 	}
@@ -495,12 +495,12 @@ func (ms *MidState) ApplyTransaction(txn types.Transaction, ts V1TransactionSupp
 		ms.reviseFileContractElement(fce, fcr.FileContract)
 	}
 	for _, sp := range txn.StorageProofs {
-		sps, ok := ts.storageProof(sp.ParentID)
+		fce, ok := ms.fileContractElement(ts, sp.ParentID)
 		if !ok {
 			panic("missing V1StorageProofSupplement")
 		}
-		ms.resolveFileContractElement(sps.FileContract, true, txid)
-		for i, sco := range sps.FileContract.FileContract.ValidProofOutputs {
+		ms.resolveFileContractElement(fce, true, txid)
+		for i, sco := range fce.FileContract.ValidProofOutputs {
 			ms.addImmatureSiacoinElement(sp.ParentID.ValidOutputID(i), sco)
 		}
 	}
@@ -509,8 +509,8 @@ func (ms *MidState) ApplyTransaction(txn types.Transaction, ts V1TransactionSupp
 			if bytes.HasPrefix(arb, types.SpecifierFoundation[:]) {
 				var update types.FoundationAddressUpdate
 				update.DecodeFrom(types.NewBufDecoder(arb[len(types.SpecifierFoundation):]))
-				ms.foundationPrimary = update.NewPrimary
-				ms.foundationFailsafe = update.NewFailsafe
+				ms.foundationSubsidy = update.NewPrimary
+				ms.foundationManagement = update.NewFailsafe
 			}
 		}
 	}
@@ -528,7 +528,7 @@ func (ms *MidState) ApplyV2Transaction(txn types.V2Transaction) {
 	}
 	for _, sfi := range txn.SiafundInputs {
 		ms.spendSiafundElement(sfi.Parent, txid)
-		claimPortion := ms.siafundPool.Sub(sfi.Parent.ClaimStart).Div64(ms.base.SiafundCount()).Mul64(sfi.Parent.SiafundOutput.Value)
+		claimPortion := ms.siafundTaxRevenue.Sub(sfi.Parent.ClaimStart).Div64(ms.base.SiafundCount()).Mul64(sfi.Parent.SiafundOutput.Value)
 		ms.addImmatureSiacoinElement(sfi.Parent.ID.V2ClaimOutputID(), types.SiacoinOutput{Value: claimPortion, Address: sfi.ClaimAddress})
 	}
 	for i, sfo := range txn.SiafundOutputs {
@@ -548,9 +548,7 @@ func (ms *MidState) ApplyV2Transaction(txn types.V2Transaction) {
 		var renter, host types.SiacoinOutput
 		switch r := fcr.Resolution.(type) {
 		case *types.V2FileContractRenewal:
-			renter, host = r.FinalRevision.RenterOutput, r.FinalRevision.HostOutput
-			renter.Value = renter.Value.Sub(r.RenterRollover)
-			host.Value = host.Value.Sub(r.HostRollover)
+			renter, host = r.FinalRenterOutput, r.FinalHostOutput
 			ms.addV2FileContractElement(fce.ID.V2RenewalID(), r.NewContract)
 		case *types.V2StorageProof:
 			renter, host = fc.RenterOutput, fc.HostOutput
@@ -568,8 +566,13 @@ func (ms *MidState) ApplyV2Transaction(txn types.V2Transaction) {
 		})
 	}
 	if txn.NewFoundationAddress != nil {
-		ms.foundationPrimary = *txn.NewFoundationAddress
-		ms.foundationFailsafe = *txn.NewFoundationAddress
+		// The subsidy may be waived by sending it to the void address. In this
+		// case, the management address is not updated (as this would
+		// permanently disable the subsidy).
+		ms.foundationSubsidy = *txn.NewFoundationAddress
+		if *txn.NewFoundationAddress != types.VoidAddress {
+			ms.foundationManagement = *txn.NewFoundationAddress
+		}
 	}
 }
 
@@ -665,14 +668,20 @@ func (au ApplyUpdate) UpdateElementProof(e *types.StateElement) {
 	au.eau.updateElementProof(e)
 }
 
-// ForEachSiacoinElement calls fn on each siacoin element related to au.
+// ForEachSiacoinElement calls fn on each siacoin element related to the applied
+// block. The created and spent flags indicate whether the element was newly
+// created in the block and/or spent in the block. Note that an element may be
+// both created and spent in the the same block.
 func (au ApplyUpdate) ForEachSiacoinElement(fn func(sce types.SiacoinElement, created, spent bool)) {
 	for _, sce := range au.ms.sces {
 		fn(sce, au.ms.isCreated(sce.ID), au.ms.isSpent(sce.ID))
 	}
 }
 
-// ForEachSiafundElement calls fn on each siafund element related to au.
+// ForEachSiafundElement calls fn on each siafund element related to the applied
+// block. The created and spent flags indicate whether the element was newly
+// created in the block and/or spent in the block. Note that an element may be
+// both created and spent in the the same block.
 func (au ApplyUpdate) ForEachSiafundElement(fn func(sfe types.SiafundElement, created, spent bool)) {
 	for _, sfe := range au.ms.sfes {
 		fn(sfe, au.ms.isCreated(sfe.ID), au.ms.isSpent(sfe.ID))
@@ -680,16 +689,28 @@ func (au ApplyUpdate) ForEachSiafundElement(fn func(sfe types.SiafundElement, cr
 }
 
 // ForEachFileContractElement calls fn on each file contract element related to
-// au. If the contract was revised, rev is non-nil.
+// the applied block. The created flag indicates whether the contract was newly
+// created. If the contract was revised, rev is non-nil and represents the state
+// of the element post-application. If the block revised the contract multiple
+// times, rev is the revision with the highest revision number. The resolved and
+// valid flags indicate whether the contract was resolved, and if so, whether it
+// was resolved via storage proof. Note that a contract may be created, revised,
+// and resolved all within the same block.
 func (au ApplyUpdate) ForEachFileContractElement(fn func(fce types.FileContractElement, created bool, rev *types.FileContractElement, resolved, valid bool)) {
 	for _, fce := range au.ms.fces {
 		fn(fce, au.ms.isCreated(fce.ID), au.ms.revs[fce.ID], au.ms.isSpent(fce.ID), au.ms.res[fce.ID])
 	}
 }
 
-// ForEachV2FileContractElement calls fn on each V2 file contract element
-// related to au. If the contract was revised, rev is non-nil. If the contract
-// was resolved, res is non-nil.
+// ForEachV2FileContractElement calls fn on each v2 file contract element
+// related to the applied block. The created flag indicates whether the contract
+// was newly created. If the contract was revised, rev is non-nil and represents
+// the state of the element post-application. If the block revised the contract
+// multiple times, rev is the revision with the highest revision number. The
+// resolved and valid flags indicate whether the contract was resolved, and if
+// so, whether it was resolved via storage proof. Note that, within a block, a
+// contract may be created and revised, or revised and resolved, but not created
+// and resolved.
 func (au ApplyUpdate) ForEachV2FileContractElement(fn func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType)) {
 	for _, fce := range au.ms.v2fces {
 		fn(fce, au.ms.isCreated(fce.ID), au.ms.v2revs[fce.ID], au.ms.v2res[fce.ID])
@@ -736,10 +757,10 @@ func ApplyBlock(s State, b types.Block, bs V1BlockSupplement, targetTimestamp ti
 
 	ms := NewMidState(s)
 	ms.ApplyBlock(b, bs)
-	s.SiafundPool = ms.siafundPool
+	s.SiafundTaxRevenue = ms.siafundTaxRevenue
 	s.Attestations += uint64(len(ms.aes))
-	s.FoundationPrimaryAddress = ms.foundationPrimary
-	s.FoundationFailsafeAddress = ms.foundationFailsafe
+	s.FoundationSubsidyAddress = ms.foundationSubsidy
+	s.FoundationManagementAddress = ms.foundationManagement
 
 	// compute updated and added elements
 	var updated, added []elementLeaf
@@ -755,7 +776,11 @@ func ApplyBlock(s State, b types.Block, bs V1BlockSupplement, targetTimestamp ti
 	return s, ApplyUpdate{ms, eau}
 }
 
-// A RevertUpdate represents the effects of reverting to a prior state.
+// A RevertUpdate represents the effects of reverting to a prior state. These
+// are the same effects seen as when applying the block, but should be processed
+// inversely. For example, if ForEachSiacoinElement reports an element with the
+// created flag set, it means the block created that element when it was
+// applied; thus, when the block is reverted, the element no longer exists.
 type RevertUpdate struct {
 	ms  *MidState
 	eru elementRevertUpdate
@@ -768,7 +793,10 @@ func (ru RevertUpdate) UpdateElementProof(e *types.StateElement) {
 	ru.eru.updateElementProof(e)
 }
 
-// ForEachSiacoinElement calls fn on each siacoin element related to ru.
+// ForEachSiacoinElement calls fn on each siacoin element related to the reverted
+// block. The created and spent flags indicate whether the element was newly
+// created in the block and/or spent in the block. Note that an element may be
+// both created and spent in the the same block.
 func (ru RevertUpdate) ForEachSiacoinElement(fn func(sce types.SiacoinElement, created, spent bool)) {
 	for i := range ru.ms.sces {
 		sce := ru.ms.sces[len(ru.ms.sces)-i-1]
@@ -776,7 +804,10 @@ func (ru RevertUpdate) ForEachSiacoinElement(fn func(sce types.SiacoinElement, c
 	}
 }
 
-// ForEachSiafundElement calls fn on each siafund element related to ru.
+// ForEachSiafundElement calls fn on each siafund element related to the
+// reverted block. The created and spent flags indicate whether the element was
+// newly created in the block and/or spent in the block. Note that an element
+// may be both created and spent in the the same block.
 func (ru RevertUpdate) ForEachSiafundElement(fn func(sfe types.SiafundElement, created, spent bool)) {
 	for i := range ru.ms.sfes {
 		sfe := ru.ms.sfes[len(ru.ms.sfes)-i-1]
@@ -785,7 +816,13 @@ func (ru RevertUpdate) ForEachSiafundElement(fn func(sfe types.SiafundElement, c
 }
 
 // ForEachFileContractElement calls fn on each file contract element related to
-// ru. If the contract was revised, rev is non-nil.
+// the reverted block. The created flag indicates whether the contract was newly
+// created. If the contract was revised, rev is non-nil and represents the state
+// of the element post-application. If the block revised the contract multiple
+// times, rev is the revision with the highest revision number. The resolved and
+// valid flags indicate whether the contract was resolved, and if so, whether it
+// was resolved via storage proof. Note that a contract may be created, revised,
+// and resolved all within the same block.
 func (ru RevertUpdate) ForEachFileContractElement(fn func(fce types.FileContractElement, created bool, rev *types.FileContractElement, resolved, valid bool)) {
 	for i := range ru.ms.fces {
 		fce := ru.ms.fces[len(ru.ms.fces)-i-1]
@@ -793,9 +830,15 @@ func (ru RevertUpdate) ForEachFileContractElement(fn func(fce types.FileContract
 	}
 }
 
-// ForEachV2FileContractElement calls fn on each V2 file contract element
-// related to au. If the contract was revised, rev is non-nil. If the contract
-// was resolved, res is non-nil.
+// ForEachV2FileContractElement calls fn on each v2 file contract element
+// related to the reverted block. The created flag indicates whether the
+// contract was newly created. If the contract was revised, rev is non-nil and
+// represents the state of the element post-application. If the block revised
+// the contract multiple times, rev is the revision with the highest revision
+// number. The resolved and valid flags indicate whether the contract was
+// resolved, and if so, whether it was resolved via storage proof. Note that,
+// within a block, a contract may be created and revised, or revised and
+// resolved, but not created and resolved.
 func (ru RevertUpdate) ForEachV2FileContractElement(fn func(fce types.V2FileContractElement, created bool, rev *types.V2FileContractElement, res types.V2FileContractResolutionType)) {
 	for i := range ru.ms.v2fces {
 		fce := ru.ms.v2fces[len(ru.ms.v2fces)-i-1]

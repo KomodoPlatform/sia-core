@@ -91,19 +91,19 @@ func (n *Network) GenesisState() State {
 	return State{
 		Network: n,
 
-		Index:          types.ChainIndex{Height: ^uint64(0)},
-		PrevTimestamps: [11]time.Time{},
-		Depth:          intToTarget(maxTarget),
-		ChildTarget:    n.InitialTarget,
-		SiafundPool:    types.ZeroCurrency,
+		Index:             types.ChainIndex{Height: ^uint64(0)},
+		PrevTimestamps:    [11]time.Time{},
+		Depth:             intToTarget(maxTarget),
+		ChildTarget:       n.InitialTarget,
+		SiafundTaxRevenue: types.ZeroCurrency,
 
-		OakTime:                   0,
-		OakTarget:                 intToTarget(maxTarget),
-		FoundationPrimaryAddress:  n.HardforkFoundation.PrimaryAddress,
-		FoundationFailsafeAddress: n.HardforkFoundation.FailsafeAddress,
-		TotalWork:                 Work{invTarget(intToTarget(maxTarget))},
-		Difficulty:                Work{invTarget(n.InitialTarget)},
-		OakWork:                   Work{invTarget(intToTarget(maxTarget))},
+		OakTime:                     0,
+		OakTarget:                   intToTarget(maxTarget),
+		FoundationSubsidyAddress:    n.HardforkFoundation.PrimaryAddress,
+		FoundationManagementAddress: n.HardforkFoundation.FailsafeAddress,
+		TotalWork:                   Work{invTarget(intToTarget(maxTarget))},
+		Difficulty:                  Work{invTarget(n.InitialTarget)},
+		OakWork:                     Work{invTarget(intToTarget(maxTarget))},
 	}
 }
 
@@ -111,18 +111,18 @@ func (n *Network) GenesisState() State {
 type State struct {
 	Network *Network `json:"-"` // network parameters are not encoded
 
-	Index          types.ChainIndex `json:"index"`
-	PrevTimestamps [11]time.Time    `json:"prevTimestamps"` // newest -> oldest
-	Depth          types.BlockID    `json:"depth"`
-	ChildTarget    types.BlockID    `json:"childTarget"`
-	SiafundPool    types.Currency   `json:"siafundPool"`
+	Index             types.ChainIndex `json:"index"`
+	PrevTimestamps    [11]time.Time    `json:"prevTimestamps"` // newest -> oldest
+	Depth             types.BlockID    `json:"depth"`
+	ChildTarget       types.BlockID    `json:"childTarget"`
+	SiafundTaxRevenue types.Currency   `json:"siafundTaxRevenue"`
 
 	// Oak hardfork state
 	OakTime   time.Duration `json:"oakTime"`
 	OakTarget types.BlockID `json:"oakTarget"`
 	// Foundation hardfork state
-	FoundationPrimaryAddress  types.Address `json:"foundationPrimaryAddress"`
-	FoundationFailsafeAddress types.Address `json:"foundationFailsafeAddress"`
+	FoundationSubsidyAddress    types.Address `json:"foundationSubsidyAddress"`
+	FoundationManagementAddress types.Address `json:"foundationManagementAddress"`
 	// v2 hardfork state
 	TotalWork    Work               `json:"totalWork"`
 	Difficulty   Work               `json:"difficulty"`
@@ -139,12 +139,12 @@ func (s State) EncodeTo(e *types.Encoder) {
 	}
 	s.Depth.EncodeTo(e)
 	s.ChildTarget.EncodeTo(e)
-	types.V2Currency(s.SiafundPool).EncodeTo(e)
+	types.V2Currency(s.SiafundTaxRevenue).EncodeTo(e)
 
 	e.WriteUint64(uint64(s.OakTime))
 	s.OakTarget.EncodeTo(e)
-	s.FoundationPrimaryAddress.EncodeTo(e)
-	s.FoundationFailsafeAddress.EncodeTo(e)
+	s.FoundationSubsidyAddress.EncodeTo(e)
+	s.FoundationManagementAddress.EncodeTo(e)
 	s.TotalWork.EncodeTo(e)
 	s.Difficulty.EncodeTo(e)
 	s.OakWork.EncodeTo(e)
@@ -160,12 +160,12 @@ func (s *State) DecodeFrom(d *types.Decoder) {
 	}
 	s.Depth.DecodeFrom(d)
 	s.ChildTarget.DecodeFrom(d)
-	(*types.V2Currency)(&s.SiafundPool).DecodeFrom(d)
+	(*types.V2Currency)(&s.SiafundTaxRevenue).DecodeFrom(d)
 
 	s.OakTime = time.Duration(d.ReadUint64())
 	s.OakTarget.DecodeFrom(d)
-	s.FoundationPrimaryAddress.DecodeFrom(d)
-	s.FoundationFailsafeAddress.DecodeFrom(d)
+	s.FoundationSubsidyAddress.DecodeFrom(d)
+	s.FoundationManagementAddress.DecodeFrom(d)
 	s.TotalWork.DecodeFrom(d)
 	s.Difficulty.DecodeFrom(d)
 	s.OakWork.DecodeFrom(d)
@@ -257,22 +257,23 @@ func (s State) AncestorDepth() uint64 {
 }
 
 // FoundationSubsidy returns the Foundation subsidy output for the child block.
-// If no subsidy is due, the returned output has a value of zero.
 func (s State) FoundationSubsidy() (sco types.SiacoinOutput, exists bool) {
-	sco.Address = s.FoundationPrimaryAddress
-
+	if s.FoundationSubsidyAddress == types.VoidAddress {
+		return types.SiacoinOutput{}, false
+	}
+	sco.Address = s.FoundationSubsidyAddress
 	subsidyPerBlock := types.Siacoins(30000)
 	blocksPerYear := uint64(365 * 24 * time.Hour / s.BlockInterval())
 	blocksPerMonth := blocksPerYear / 12
 	hardforkHeight := s.Network.HardforkFoundation.Height
 	if s.childHeight() < hardforkHeight || (s.childHeight()-hardforkHeight)%blocksPerMonth != 0 {
-		sco.Value = types.ZeroCurrency
+		return types.SiacoinOutput{}, false
 	} else if s.childHeight() == hardforkHeight {
 		sco.Value = subsidyPerBlock.Mul64(blocksPerYear)
 	} else {
 		sco.Value = subsidyPerBlock.Mul64(blocksPerMonth)
 	}
-	return sco, !sco.Value.IsZero()
+	return sco, true
 }
 
 // NonceFactor is the factor by which all block nonces must be divisible.
@@ -342,6 +343,9 @@ func (s State) V2TransactionWeight(txn types.V2Transaction) uint64 {
 		a.EncodeTo(e)
 	}
 	e.Write(txn.ArbitraryData)
+	if txn.NewFoundationAddress != nil {
+		txn.NewFoundationAddress.EncodeTo(e)
+	}
 	e.Flush()
 	return uint64(wc.n)
 }
@@ -370,12 +374,7 @@ func (s State) FileContractTax(fc types.FileContract) types.Currency {
 
 // V2FileContractTax computes the tax levied on a given v2 contract.
 func (s State) V2FileContractTax(fc types.V2FileContract) types.Currency {
-	sum := fc.RenterOutput.Value.Add(fc.HostOutput.Value)
-	tax := sum.Div64(25) // 4%
-	// round down to nearest multiple of SiafundCount
-	_, r := bits.Div64(0, tax.Hi, s.SiafundCount())
-	_, r = bits.Div64(r, tax.Lo, s.SiafundCount())
-	return tax.Sub(types.NewCurrency64(r))
+	return fc.RenterOutput.Value.Add(fc.HostOutput.Value).Div64(25) // 4%
 }
 
 // StorageProofLeafIndex returns the leaf index used when computing or
@@ -533,7 +532,7 @@ func (s State) PartialSigHash(txn types.Transaction, cf types.CoveredFields) typ
 
 // TransactionsCommitment returns the commitment hash covering the transactions
 // that comprise a child block.
-func (s *State) TransactionsCommitment(txns []types.Transaction, v2txns []types.V2Transaction) types.Hash256 {
+func (s State) TransactionsCommitment(txns []types.Transaction, v2txns []types.V2Transaction) types.Hash256 {
 	var acc blake2b.Accumulator
 	for _, txn := range txns {
 		acc.AddLeaf(txn.FullHash())
@@ -574,7 +573,6 @@ func (s State) ContractSigHash(fc types.V2FileContract) types.Hash256 {
 func (s State) RenewalSigHash(fcr types.V2FileContractRenewal) types.Hash256 {
 	nilSigs(
 		&fcr.NewContract.RenterSignature, &fcr.NewContract.HostSignature,
-		&fcr.FinalRevision.RenterSignature, &fcr.FinalRevision.HostSignature,
 		&fcr.RenterSignature, &fcr.HostSignature,
 	)
 	return hashAll("sig/filecontractrenewal", s.v2ReplayPrefix(), fcr)
@@ -588,16 +586,16 @@ func (s State) AttestationSigHash(a types.Attestation) types.Hash256 {
 
 // A MidState represents the state of the chain within a block.
 type MidState struct {
-	base               State
-	created            map[types.ElementID]int // indices into element slices
-	spends             map[types.ElementID]types.TransactionID
-	revs               map[types.FileContractID]*types.FileContractElement
-	res                map[types.FileContractID]bool
-	v2revs             map[types.FileContractID]*types.V2FileContractElement
-	v2res              map[types.FileContractID]types.V2FileContractResolutionType
-	siafundPool        types.Currency
-	foundationPrimary  types.Address
-	foundationFailsafe types.Address
+	base                 State
+	created              map[types.ElementID]int // indices into element slices
+	spends               map[types.ElementID]types.TransactionID
+	revs                 map[types.FileContractID]*types.FileContractElement
+	res                  map[types.FileContractID]bool
+	v2revs               map[types.FileContractID]*types.V2FileContractElement
+	v2res                map[types.FileContractID]types.V2FileContractResolutionType
+	siafundTaxRevenue    types.Currency
+	foundationSubsidy    types.Address
+	foundationManagement types.Address
 
 	// elements created/updated by block
 	sces   []types.SiacoinElement
@@ -609,27 +607,58 @@ type MidState struct {
 }
 
 func (ms *MidState) siacoinElement(ts V1TransactionSupplement, id types.SiacoinOutputID) (types.SiacoinElement, bool) {
-	if i, ok := ms.created[types.Hash256(id)]; ok {
+	if i, ok := ms.created[id]; ok {
 		return ms.sces[i], true
 	}
-	return ts.siacoinElement(id)
+	for _, sce := range ts.SiacoinInputs {
+		if sce.ID == id {
+			return sce, true
+		}
+	}
+	return types.SiacoinElement{}, false
 }
 
 func (ms *MidState) siafundElement(ts V1TransactionSupplement, id types.SiafundOutputID) (types.SiafundElement, bool) {
 	if i, ok := ms.created[id]; ok {
 		return ms.sfes[i], true
 	}
-	return ts.siafundElement(id)
+	for _, sfe := range ts.SiafundInputs {
+		if sfe.ID == id {
+			return sfe, true
+		}
+	}
+	return types.SiafundElement{}, false
 }
 
 func (ms *MidState) fileContractElement(ts V1TransactionSupplement, id types.FileContractID) (types.FileContractElement, bool) {
 	if rev, ok := ms.revs[id]; ok {
 		return *rev, true
-	}
-	if i, ok := ms.created[id]; ok {
+	} else if i, ok := ms.created[id]; ok {
 		return ms.fces[i], true
 	}
-	return ts.revision(id)
+	for _, fce := range ts.RevisedFileContracts {
+		if fce.ID == id {
+			return fce, true
+		}
+	}
+	for _, sps := range ts.StorageProofs {
+		if sps.FileContract.ID == id {
+			return sps.FileContract, true
+		}
+	}
+	return types.FileContractElement{}, false
+}
+
+func (ms *MidState) storageProofWindowID(ts V1TransactionSupplement, id types.FileContractID) (types.BlockID, bool) {
+	if i, ok := ms.created[id]; ok && ms.fces[i].FileContract.WindowStart == ms.base.childHeight() {
+		return ms.base.Index.ID, true
+	}
+	for _, sps := range ts.StorageProofs {
+		if sps.FileContract.ID == id {
+			return sps.WindowID, true
+		}
+	}
+	return types.BlockID{}, false
 }
 
 func (ms *MidState) spent(id types.ElementID) (types.TransactionID, bool) {
@@ -650,16 +679,16 @@ func (ms *MidState) isCreated(id types.ElementID) bool {
 // NewMidState constructs a MidState initialized to the provided base state.
 func NewMidState(s State) *MidState {
 	return &MidState{
-		base:               s,
-		created:            make(map[types.ElementID]int),
-		spends:             make(map[types.ElementID]types.TransactionID),
-		revs:               make(map[types.FileContractID]*types.FileContractElement),
-		res:                make(map[types.FileContractID]bool),
-		v2revs:             make(map[types.FileContractID]*types.V2FileContractElement),
-		v2res:              make(map[types.FileContractID]types.V2FileContractResolutionType),
-		siafundPool:        s.SiafundPool,
-		foundationPrimary:  s.FoundationPrimaryAddress,
-		foundationFailsafe: s.FoundationFailsafeAddress,
+		base:                 s,
+		created:              make(map[types.ElementID]int),
+		spends:               make(map[types.ElementID]types.TransactionID),
+		revs:                 make(map[types.FileContractID]*types.FileContractElement),
+		res:                  make(map[types.FileContractID]bool),
+		v2revs:               make(map[types.FileContractID]*types.V2FileContractElement),
+		v2res:                make(map[types.FileContractID]types.V2FileContractResolutionType),
+		siafundTaxRevenue:    s.SiafundTaxRevenue,
+		foundationSubsidy:    s.FoundationSubsidyAddress,
+		foundationManagement: s.FoundationManagementAddress,
 	}
 }
 
@@ -710,42 +739,6 @@ func (ts *V1TransactionSupplement) DecodeFrom(d *types.Decoder) {
 	types.DecodeSlice(d, &ts.SiafundInputs)
 	types.DecodeSlice(d, &ts.RevisedFileContracts)
 	types.DecodeSlice(d, &ts.StorageProofs)
-}
-
-func (ts V1TransactionSupplement) siacoinElement(id types.SiacoinOutputID) (sce types.SiacoinElement, ok bool) {
-	for _, sce := range ts.SiacoinInputs {
-		if types.SiacoinOutputID(sce.ID) == id {
-			return sce, true
-		}
-	}
-	return
-}
-
-func (ts V1TransactionSupplement) siafundElement(id types.SiafundOutputID) (sfe types.SiafundElement, ok bool) {
-	for _, sfe := range ts.SiafundInputs {
-		if types.SiafundOutputID(sfe.ID) == id {
-			return sfe, true
-		}
-	}
-	return
-}
-
-func (ts V1TransactionSupplement) revision(id types.FileContractID) (fce types.FileContractElement, ok bool) {
-	for _, fce := range ts.RevisedFileContracts {
-		if types.FileContractID(fce.ID) == id {
-			return fce, true
-		}
-	}
-	return
-}
-
-func (ts V1TransactionSupplement) storageProof(id types.FileContractID) (sps V1StorageProofSupplement, ok bool) {
-	for _, sps := range ts.StorageProofs {
-		if types.FileContractID(sps.FileContract.ID) == id {
-			return sps, true
-		}
-	}
-	return
 }
 
 // A V1BlockSupplement contains elements that are associated with a v1 block,

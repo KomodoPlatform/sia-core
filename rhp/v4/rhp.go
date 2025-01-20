@@ -160,18 +160,6 @@ func (hp HostPrices) SigHash() types.Hash256 {
 	return h.Sum()
 }
 
-// Validate checks the host prices for validity. It returns an error if the
-// prices have expired or the signature is invalid.
-func (hp *HostPrices) Validate(pk types.PublicKey) error {
-	if time.Until(hp.ValidUntil) <= 0 {
-		return ErrPricesExpired
-	}
-	if !pk.VerifyHash(hp.SigHash(), hp.Signature) {
-		return ErrInvalidSignature
-	}
-	return nil
-}
-
 // HostSettings specify the settings of a host.
 type HostSettings struct {
 	ProtocolVersion     [3]uint8       `json:"protocolVersion"`
@@ -206,8 +194,21 @@ func (a *Account) UnmarshalText(b []byte) error {
 	return nil
 }
 
+// Token returns a signed account token authorizing spending from the account on the
+// host.
+func (a *Account) Token(renterKey types.PrivateKey, hostKey types.PublicKey) AccountToken {
+	token := AccountToken{
+		HostKey:    hostKey,
+		Account:    Account(renterKey.PublicKey()),
+		ValidUntil: time.Now().Add(5 * time.Minute),
+	}
+	token.Signature = renterKey.SignHash(token.SigHash())
+	return token
+}
+
 // An AccountToken authorizes an account action.
 type AccountToken struct {
+	HostKey    types.PublicKey `json:"hostKey"`
 	Account    Account         `json:"account"`
 	ValidUntil time.Time       `json:"validUntil"`
 	Signature  types.Signature `json:"signature"`
@@ -216,20 +217,10 @@ type AccountToken struct {
 // SigHash returns the hash of the account token used for signing.
 func (at *AccountToken) SigHash() types.Hash256 {
 	h := types.NewHasher()
+	at.HostKey.EncodeTo(h.E)
 	at.Account.EncodeTo(h.E)
 	h.E.WriteTime(at.ValidUntil)
 	return h.Sum()
-}
-
-// Validate verifies the account token is valid for use. It returns an error if
-// the token has expired or the signature is invalid.
-func (at AccountToken) Validate() error {
-	if time.Now().After(at.ValidUntil) {
-		return NewRPCError(ErrorCodeBadRequest, "account token expired")
-	} else if !types.PublicKey(at.Account).VerifyHash(at.SigHash(), at.Signature) {
-		return ErrInvalidSignature
-	}
-	return nil
 }
 
 // GenerateAccount generates a pair of private key and Account from a secure
@@ -310,6 +301,7 @@ type (
 	// RPCRefreshContractSecondResponse implements Object.
 	RPCRefreshContractSecondResponse struct {
 		RenterRenewalSignature  types.Signature         `json:"renterRenewalSignature"`
+		RenterContractSignature types.Signature         `json:"renterContractSignature"`
 		RenterSatisfiedPolicies []types.SatisfiedPolicy `json:"renterSatisfiedPolicies"`
 	}
 	// RPCRefreshContractThirdResponse implements Object.
@@ -344,6 +336,7 @@ type (
 	// RPCRenewContractSecondResponse implements Object.
 	RPCRenewContractSecondResponse struct {
 		RenterRenewalSignature  types.Signature         `json:"renterRenewalSignature"`
+		RenterContractSignature types.Signature         `json:"renterContractSignature"`
 		RenterSatisfiedPolicies []types.SatisfiedPolicy `json:"renterSatisfiedPolicies"`
 	}
 	// RPCRenewContractThirdResponse implements Object.
@@ -380,8 +373,16 @@ type (
 		ContractID types.FileContractID `json:"contractID"`
 	}
 	// RPCLatestRevisionResponse implements Object.
+	//
+	// The `Revisable` field indicates whether the
+	// host will accept further revisions to the contract. A host will not accept revisions too
+	// close to the proof window or revisions on contracts that have already been resolved.
+	// The `Renewed` field indicates whether the contract was renewed. If the contract was
+	// renewed, the renter can use `FileContractID.V2RenewalID` to get the ID of the new contract.
 	RPCLatestRevisionResponse struct {
-		Contract types.V2FileContract `json:"contract"`
+		Contract  types.V2FileContract `json:"contract"`
+		Revisable bool                 `json:"revisable"`
+		Renewed   bool                 `json:"renewed"`
 	}
 
 	// RPCReadSectorRequest implements Object.
@@ -425,7 +426,6 @@ type (
 	RPCWriteSectorRequest struct {
 		Prices     HostPrices   `json:"prices"`
 		Token      AccountToken `json:"token"`
-		Duration   uint64       `json:"duration"`
 		DataLength uint64       `json:"dataLength"` // extended to SectorSize by host
 	}
 
@@ -581,7 +581,8 @@ func ContractCost(cs consensus.State, p HostPrices, fc types.V2FileContract, min
 
 // RenewalCost calculates the cost to the host and renter for renewing a contract.
 func RenewalCost(cs consensus.State, p HostPrices, r types.V2FileContractRenewal, minerFee types.Currency) (renter, host types.Currency) {
-	renter = r.NewContract.RenterOutput.Value.Add(p.ContractPrice).Add(minerFee).Add(cs.V2FileContractTax(r.NewContract)).Sub(r.RenterRollover)
+	contractCost := r.NewContract.HostOutput.Value.Sub(r.NewContract.TotalCollateral) // (contract price + storage cost + locked collateral) - locked collateral
+	renter = r.NewContract.RenterOutput.Value.Add(contractCost).Add(minerFee).Add(cs.V2FileContractTax(r.NewContract)).Sub(r.RenterRollover)
 	host = r.NewContract.TotalCollateral.Sub(r.HostRollover)
 	return
 }
@@ -589,6 +590,9 @@ func RenewalCost(cs consensus.State, p HostPrices, r types.V2FileContractRenewal
 // RefreshCost calculates the cost to the host and renter for refreshing a contract.
 func RefreshCost(cs consensus.State, p HostPrices, r types.V2FileContractRenewal, minerFee types.Currency) (renter, host types.Currency) {
 	renter = r.NewContract.RenterOutput.Value.Add(p.ContractPrice).Add(minerFee).Add(cs.V2FileContractTax(r.NewContract)).Sub(r.RenterRollover)
+	// the calculation is different from renewal because the host's revenue is also rolled into the refresh.
+	// This calculates the new collateral the host is expected to put up:
+	// new collateral = (new revenue + existing revenue + new collateral + existing collateral) - new revenue - (existing revenue + existing collateral)
 	host = r.NewContract.HostOutput.Value.Sub(p.ContractPrice).Sub(r.HostRollover)
 	return
 }
@@ -662,12 +666,8 @@ func MinRenterAllowance(hp HostPrices, duration uint64, collateral types.Currenc
 // RenewContract creates a contract renewal for the renew RPC
 func RenewContract(fc types.V2FileContract, prices HostPrices, rp RPCRenewContractParams) (types.V2FileContractRenewal, Usage) {
 	var renewal types.V2FileContractRenewal
-	// clear the old contract
-	renewal.FinalRevision = fc
-	renewal.FinalRevision.RevisionNumber = types.MaxRevisionNumber
-	renewal.FinalRevision.FileMerkleRoot = types.Hash256{}
-	renewal.FinalRevision.RenterSignature = types.Signature{}
-	renewal.FinalRevision.HostSignature = types.Signature{}
+	renewal.FinalRenterOutput = fc.RenterOutput
+	renewal.FinalHostOutput = fc.HostOutput
 
 	// create the new contract
 	renewal.NewContract = fc
@@ -709,6 +709,7 @@ func RenewContract(fc types.V2FileContract, prices HostPrices, rp RPCRenewContra
 	} else {
 		renewal.HostRollover = fc.TotalCollateral
 	}
+	renewal.FinalHostOutput.Value = renewal.FinalHostOutput.Value.Sub(renewal.HostRollover)
 
 	// if the remaining renter output is greater than the required allowance,
 	// only roll over the new allowance. Otherwise, roll over the remaining
@@ -718,6 +719,8 @@ func RenewContract(fc types.V2FileContract, prices HostPrices, rp RPCRenewContra
 	} else {
 		renewal.RenterRollover = fc.RenterOutput.Value
 	}
+	renewal.FinalRenterOutput.Value = renewal.FinalRenterOutput.Value.Sub(renewal.RenterRollover)
+
 	return renewal, Usage{
 		RPC:              prices.ContractPrice,
 		Storage:          renewal.NewContract.HostOutput.Value.Sub(renewal.NewContract.TotalCollateral).Sub(prices.ContractPrice),
@@ -728,12 +731,13 @@ func RenewContract(fc types.V2FileContract, prices HostPrices, rp RPCRenewContra
 // RefreshContract creates a contract renewal for the refresh RPC.
 func RefreshContract(fc types.V2FileContract, prices HostPrices, rp RPCRefreshContractParams) (types.V2FileContractRenewal, Usage) {
 	var renewal types.V2FileContractRenewal
-
-	// clear the old contract
-	renewal.FinalRevision = fc
-	renewal.FinalRevision.RevisionNumber = types.MaxRevisionNumber
-	renewal.FinalRevision.RenterSignature = types.Signature{}
-	renewal.FinalRevision.HostSignature = types.Signature{}
+	// roll over everything from the existing contract
+	renewal.FinalRenterOutput = fc.RenterOutput
+	renewal.FinalHostOutput = fc.HostOutput
+	renewal.FinalRenterOutput.Value = types.ZeroCurrency
+	renewal.FinalHostOutput.Value = types.ZeroCurrency
+	renewal.HostRollover = fc.HostOutput.Value
+	renewal.RenterRollover = fc.RenterOutput.Value
 
 	// create the new contract
 	renewal.NewContract = fc
@@ -746,12 +750,9 @@ func RefreshContract(fc types.V2FileContract, prices HostPrices, rp RPCRefreshCo
 	renewal.NewContract.MissedHostValue = fc.MissedHostValue.Add(rp.Collateral)
 	// total collateral includes the additional requested collateral
 	renewal.NewContract.TotalCollateral = fc.TotalCollateral.Add(rp.Collateral)
-	// roll over everything from the existing contract
-	renewal.HostRollover = fc.HostOutput.Value
-	renewal.RenterRollover = fc.RenterOutput.Value
 	return renewal, Usage{
+		// Refresh usage is only the contract price since duration is not increased
 		RPC:              prices.ContractPrice,
-		Storage:          renewal.NewContract.HostOutput.Value.Sub(renewal.NewContract.TotalCollateral).Sub(prices.ContractPrice),
 		RiskedCollateral: renewal.NewContract.TotalCollateral.Sub(renewal.NewContract.MissedHostValue),
 	}
 }

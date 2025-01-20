@@ -1089,11 +1089,6 @@ func TestApplyRevertBlockV2(t *testing.T) {
 		checkUpdateElements(au, addedSCEs, spentSCEs, addedSFEs, spentSFEs)
 	}
 
-	_ = renterPublicKey
-	_ = hostPublicKey
-	_ = checkRevertElements
-	_ = prev
-
 	// revert block spending sc and sf
 	ru := RevertBlock(prev, b2, V1BlockSupplement{})
 	cs = prev
@@ -1294,5 +1289,254 @@ func TestApplyRevertBlockV2(t *testing.T) {
 	} else {
 		checkApplyUpdate(t, cs, au)
 		checkUpdateElements(au, addedSCEs, spentSCEs, addedSFEs, spentSFEs)
+	}
+}
+
+func TestSiafunds(t *testing.T) {
+	n, genesisBlock := testnet()
+	n.HardforkV2.AllowHeight = 1
+	n.HardforkV2.RequireHeight = 2
+
+	key := types.GeneratePrivateKey()
+
+	giftAddress := types.StandardAddress(key.PublicKey())
+	giftAmountSC := types.Siacoins(100e3)
+	giftAmountSF := uint64(1000)
+	giftTxn := types.Transaction{
+		SiacoinOutputs: []types.SiacoinOutput{
+			{Address: giftAddress, Value: giftAmountSC},
+		},
+		SiafundOutputs: []types.SiafundOutput{
+			{Address: giftAddress, Value: giftAmountSF},
+		},
+	}
+	genesisBlock.Transactions = []types.Transaction{giftTxn}
+	db, cs := newConsensusDB(n, genesisBlock)
+
+	signTxn := func(cs State, txn *types.V2Transaction) {
+		for i := range txn.SiacoinInputs {
+			txn.SiacoinInputs[i].SatisfiedPolicy = types.SatisfiedPolicy{
+				Policy:     types.PolicyPublicKey(key.PublicKey()),
+				Signatures: []types.Signature{key.SignHash(cs.InputSigHash(*txn))},
+			}
+		}
+		for i := range txn.SiafundInputs {
+			txn.SiafundInputs[i].SatisfiedPolicy = types.SatisfiedPolicy{
+				Policy:     types.PolicyPublicKey(key.PublicKey()),
+				Signatures: []types.Signature{key.SignHash(cs.InputSigHash(*txn))},
+			}
+		}
+		for i := range txn.FileContracts {
+			txn.FileContracts[i].RenterSignature = key.SignHash(cs.ContractSigHash(txn.FileContracts[i]))
+			txn.FileContracts[i].HostSignature = key.SignHash(cs.ContractSigHash(txn.FileContracts[i]))
+		}
+	}
+	mineTxns := func(txns []types.Transaction, v2txns []types.V2Transaction) (au ApplyUpdate, err error) {
+		b := types.Block{
+			ParentID:     cs.Index.ID,
+			Timestamp:    types.CurrentTimestamp(),
+			MinerPayouts: []types.SiacoinOutput{{Address: types.VoidAddress, Value: cs.BlockReward()}},
+			Transactions: txns,
+		}
+		if len(v2txns) > 0 {
+			b.V2 = &types.V2BlockData{
+				Height:       cs.Index.Height + 1,
+				Commitment:   cs.Commitment(cs.TransactionsCommitment(txns, v2txns), b.MinerPayouts[0].Address),
+				Transactions: v2txns,
+			}
+		}
+		findBlockNonce(cs, &b)
+		if err = ValidateBlock(cs, b, V1BlockSupplement{}); err != nil {
+			return
+		}
+		cs, au = ApplyBlock(cs, b, V1BlockSupplement{}, db.ancestorTimestamp(b.ParentID))
+		db.applyBlock(au)
+		return
+	}
+
+	fc := types.V2FileContract{
+		ProofHeight:      20,
+		ExpirationHeight: 30,
+		RenterOutput:     types.SiacoinOutput{Value: types.Siacoins(5000)},
+		HostOutput:       types.SiacoinOutput{Value: types.Siacoins(5000)},
+		RenterPublicKey:  key.PublicKey(),
+		HostPublicKey:    key.PublicKey(),
+	}
+	fcValue := fc.RenterOutput.Value.Add(fc.HostOutput.Value).Add(cs.V2FileContractTax(fc))
+
+	txn := types.V2Transaction{
+		SiacoinInputs: []types.V2SiacoinInput{{
+			Parent: db.sces[giftTxn.SiacoinOutputID(0)],
+		}},
+		SiacoinOutputs: []types.SiacoinOutput{{
+			Address: giftAddress,
+			Value:   giftAmountSC.Sub(fcValue),
+		}},
+		FileContracts: []types.V2FileContract{fc},
+	}
+	signTxn(cs, &txn)
+	prev := cs
+	if _, err := mineTxns(nil, []types.V2Transaction{txn}); err != nil {
+		t.Fatal(err)
+	}
+	// siafund revenue should have increased
+	if cs.SiafundTaxRevenue != prev.SiafundTaxRevenue.Add(cs.V2FileContractTax(fc)) {
+		t.Fatalf("expected %v siafund revenue, got %v", prev.SiafundTaxRevenue.Add(cs.V2FileContractTax(fc)), cs.SiafundTaxRevenue)
+	}
+
+	// make a siafund claim
+	txn = types.V2Transaction{
+		SiafundInputs: []types.V2SiafundInput{{
+			Parent:       db.sfes[giftTxn.SiafundOutputID(0)],
+			ClaimAddress: giftAddress,
+		}},
+		SiafundOutputs: []types.SiafundOutput{{
+			Address: giftAddress,
+			Value:   giftAmountSF,
+		}},
+	}
+	signTxn(cs, &txn)
+	prev = cs
+	if au, err := mineTxns(nil, []types.V2Transaction{txn}); err != nil {
+		t.Fatal(err)
+	} else {
+		// siafund revenue should be unchanged
+		if cs.SiafundTaxRevenue != prev.SiafundTaxRevenue {
+			t.Fatalf("expected %v siafund revenue, got %v", prev.SiafundTaxRevenue, cs.SiafundTaxRevenue)
+		}
+		// should have received a timelocked siafund claim output
+		var claimOutput *types.SiacoinElement
+		au.ForEachSiacoinElement(func(sce types.SiacoinElement, _, _ bool) {
+			if sce.ID == txn.SiafundInputs[0].Parent.ID.V2ClaimOutputID() {
+				claimOutput = &sce
+			}
+		})
+		if claimOutput == nil {
+			t.Fatal("expected siafund claim output")
+		} else if claimOutput.MaturityHeight != cs.MaturityHeight()-1 {
+			t.Fatalf("expected siafund claim output to mature at height %v, got %v", cs.MaturityHeight()-1, claimOutput.MaturityHeight)
+		} else if exp := cs.V2FileContractTax(fc).Div64(cs.SiafundCount() / giftAmountSF); claimOutput.SiacoinOutput.Value != exp {
+			t.Fatalf("expected siafund claim output value %v, got %v", exp, claimOutput.SiacoinOutput.Value)
+		}
+	}
+}
+
+func TestFoundationSubsidy(t *testing.T) {
+	key := types.GeneratePrivateKey()
+	addr := types.StandardAddress(key.PublicKey())
+	n, genesisBlock := testnet()
+	n.HardforkFoundation.Height = 1
+	n.HardforkFoundation.PrimaryAddress = addr
+	n.HardforkFoundation.FailsafeAddress = addr
+	n.HardforkV2.AllowHeight = 1
+	n.HardforkV2.RequireHeight = 1
+	n.BlockInterval = 10 * time.Hour // subsidies every 10 blocks
+	subsidyInterval := uint64(365 * 24 * time.Hour / n.BlockInterval / 12)
+	genesisBlock.Transactions = []types.Transaction{{
+		SiacoinOutputs: []types.SiacoinOutput{{
+			Address: addr,
+			Value:   types.Siacoins(1), // funds for changing address later
+		}},
+	}}
+	scoid := genesisBlock.Transactions[0].SiacoinOutputID(0)
+
+	db, cs := newConsensusDB(n, genesisBlock)
+	mineBlock := func(txns []types.V2Transaction) (subsidy types.SiacoinElement, exists bool) {
+		b := types.Block{
+			ParentID:     cs.Index.ID,
+			Timestamp:    types.CurrentTimestamp(),
+			MinerPayouts: []types.SiacoinOutput{{Address: types.VoidAddress, Value: cs.BlockReward()}},
+			V2: &types.V2BlockData{
+				Height:       cs.Index.Height + 1,
+				Commitment:   cs.Commitment(cs.TransactionsCommitment(nil, txns), types.VoidAddress),
+				Transactions: txns,
+			},
+		}
+		bs := db.supplementTipBlock(b)
+		findBlockNonce(cs, &b)
+		if err := ValidateBlock(cs, b, bs); err != nil {
+			t.Fatal(err)
+			return
+		}
+		var au ApplyUpdate
+		cs, au = ApplyBlock(cs, b, bs, db.ancestorTimestamp(b.ParentID))
+		db.applyBlock(au)
+		au.ForEachSiacoinElement(func(sce types.SiacoinElement, created, _ bool) {
+			if created && sce.SiacoinOutput.Address == addr {
+				subsidy = sce
+				exists = true
+			}
+		})
+		return
+	}
+
+	// receive initial subsidy
+	initialSubsidy, ok := mineBlock(nil)
+	if !ok {
+		t.Fatal("expected subsidy")
+	}
+
+	// mine until we receive a normal subsidy
+	for range subsidyInterval - 1 {
+		if _, ok := mineBlock(nil); ok {
+			t.Fatal("unexpected subsidy")
+		}
+	}
+	subsidy, ok := mineBlock(nil)
+	if !ok {
+		t.Fatal("expected subsidy")
+	} else if subsidy.SiacoinOutput.Value != initialSubsidy.SiacoinOutput.Value.Div64(12) {
+		t.Fatal("expected subsidy to be 1/12 of initial subsidy")
+	}
+	// disable subsidy
+	txn := types.V2Transaction{
+		SiacoinInputs: []types.V2SiacoinInput{{
+			Parent: db.sces[scoid],
+			SatisfiedPolicy: types.SatisfiedPolicy{
+				Policy: types.PolicyPublicKey(key.PublicKey()),
+			},
+		}},
+		SiacoinOutputs: []types.SiacoinOutput{{
+			Address: addr,
+			Value:   db.sces[scoid].SiacoinOutput.Value,
+		}},
+		NewFoundationAddress: &types.VoidAddress,
+	}
+	txn.SiacoinInputs[0].SatisfiedPolicy.Signatures = []types.Signature{key.SignHash(cs.InputSigHash(txn))}
+	scoid = txn.SiacoinOutputID(txn.ID(), 0)
+	mineBlock([]types.V2Transaction{txn})
+
+	// mine until we would receive another subsidy
+	for range subsidyInterval {
+		if _, ok := mineBlock(nil); ok {
+			t.Fatal("unexpected subsidy")
+		}
+	}
+
+	// re-enable subsidy
+	txn = types.V2Transaction{
+		SiacoinInputs: []types.V2SiacoinInput{{
+			Parent: db.sces[scoid],
+			SatisfiedPolicy: types.SatisfiedPolicy{
+				Policy: types.PolicyPublicKey(key.PublicKey()),
+			},
+		}},
+		SiacoinOutputs: []types.SiacoinOutput{{
+			Address: addr,
+			Value:   db.sces[scoid].SiacoinOutput.Value,
+		}},
+		NewFoundationAddress: &addr,
+	}
+	txn.SiacoinInputs[0].SatisfiedPolicy.Signatures = []types.Signature{key.SignHash(cs.InputSigHash(txn))}
+	mineBlock([]types.V2Transaction{txn})
+
+	// mine until we would receive another subsidy
+	for range subsidyInterval - 3 {
+		if _, ok := mineBlock(nil); ok {
+			t.Fatal("unexpected subsidy")
+		}
+	}
+	if _, ok := mineBlock(nil); !ok {
+		t.Fatal("expected subsidy")
 	}
 }

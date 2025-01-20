@@ -77,12 +77,14 @@ func (a Account) EncodeTo(e *types.Encoder) { e.Write(a[:]) }
 func (a *Account) DecodeFrom(d *types.Decoder) { d.Read(a[:]) }
 
 func (at AccountToken) encodeTo(e *types.Encoder) {
+	at.HostKey.EncodeTo(e)
 	at.Account.EncodeTo(e)
 	e.WriteTime(at.ValidUntil)
 	at.Signature.EncodeTo(e)
 }
 
 func (at *AccountToken) decodeFrom(d *types.Decoder) {
+	at.HostKey.DecodeFrom(d)
 	at.Account.DecodeFrom(d)
 	at.ValidUntil = d.ReadTime()
 	at.Signature.DecodeFrom(d)
@@ -263,10 +265,12 @@ func (r *RPCRenewContractResponse) maxLen() int {
 
 func (r *RPCRenewContractSecondResponse) encodeTo(e *types.Encoder) {
 	r.RenterRenewalSignature.EncodeTo(e)
+	r.RenterContractSignature.EncodeTo(e)
 	types.EncodeSlice(e, r.RenterSatisfiedPolicies)
 }
 func (r *RPCRenewContractSecondResponse) decodeFrom(d *types.Decoder) {
 	r.RenterRenewalSignature.DecodeFrom(d)
+	r.RenterContractSignature.DecodeFrom(d)
 	types.DecodeSlice(d, &r.RenterSatisfiedPolicies)
 }
 func (r *RPCRenewContractSecondResponse) maxLen() int {
@@ -331,10 +335,12 @@ func (r *RPCRefreshContractResponse) maxLen() int {
 
 func (r *RPCRefreshContractSecondResponse) encodeTo(e *types.Encoder) {
 	r.RenterRenewalSignature.EncodeTo(e)
+	r.RenterContractSignature.EncodeTo(e)
 	types.EncodeSlice(e, r.RenterSatisfiedPolicies)
 }
 func (r *RPCRefreshContractSecondResponse) decodeFrom(d *types.Decoder) {
 	r.RenterRenewalSignature.DecodeFrom(d)
+	r.RenterContractSignature.DecodeFrom(d)
 	types.DecodeSlice(d, &r.RenterSatisfiedPolicies)
 }
 func (r *RPCRefreshContractSecondResponse) maxLen() int {
@@ -469,9 +475,13 @@ func (r *RPCLatestRevisionRequest) maxLen() int {
 
 func (r *RPCLatestRevisionResponse) encodeTo(e *types.Encoder) {
 	r.Contract.EncodeTo(e)
+	e.WriteBool(r.Revisable)
+	e.WriteBool(r.Renewed)
 }
 func (r *RPCLatestRevisionResponse) decodeFrom(d *types.Decoder) {
 	r.Contract.DecodeFrom(d)
+	r.Revisable = d.ReadBool()
+	r.Renewed = d.ReadBool()
 }
 func (r *RPCLatestRevisionResponse) maxLen() int {
 	return sizeofContract
@@ -510,13 +520,11 @@ func (r *RPCReadSectorResponse) maxLen() int {
 func (r RPCWriteSectorRequest) encodeTo(e *types.Encoder) {
 	r.Prices.EncodeTo(e)
 	r.Token.encodeTo(e)
-	e.WriteUint64(r.Duration)
 	e.WriteUint64(r.DataLength)
 }
 func (r *RPCWriteSectorRequest) decodeFrom(d *types.Decoder) {
 	r.Prices.DecodeFrom(d)
 	r.Token.decodeFrom(d)
-	r.Duration = d.ReadUint64()
 	r.DataLength = d.ReadUint64()
 }
 func (r *RPCWriteSectorRequest) maxLen() int {

@@ -516,25 +516,19 @@ type V2FileContractRevision struct {
 }
 
 // A V2FileContractResolution closes a v2 file contract's payment channel. There
-// are four ways a contract can be resolved:
+// are three ways a contract can be resolved:
 //
-// 1) The renter can finalize the contract's current state, preventing further
-// revisions and immediately creating its outputs.
-//
-// 2) The renter and host can jointly renew the contract. The old contract is
+// 1) The renter and host can jointly renew the contract. The old contract is
 // finalized, and a portion of its funds are "rolled over" into a new contract.
+// Renewals must be submitted prior to the contract's ProofHeight.
 //
-// 3) The host can submit a storage proof, asserting that it has faithfully
-// stored the contract data for the agreed-upon duration. Typically, a storage
-// proof is only required if the renter is unable or unwilling to sign a
-// renewal. A storage proof can only be submitted after the contract's
-// ProofHeight; this allows the renter (or host) to broadcast the
-// latest contract revision prior to the proof.
+// 2) If the renter is unwilling or unable to sign a renewal, the host can
+// submit a storage proof, asserting that it has faithfully stored the contract
+// data for the agreed-upon duration. Storage proofs must be submitted after the
+// contract's ProofHeight and prior to its ExpirationHeight.
 //
-// 4) Lastly, anyone can submit a contract expiration. An expiration can only
-// be submitted after the contract's ExpirationHeight; this gives the host a
-// reasonable window of time after the ProofHeight in which to submit a storage
-// proof.
+// 3) Lastly, anyone can submit a contract expiration. An expiration can only be
+// submitted after the contract's ExpirationHeight.
 //
 // Once a contract has been resolved, it cannot be altered or resolved again.
 // When a contract is resolved, its RenterOutput and HostOutput are created
@@ -561,10 +555,11 @@ func (*V2FileContractExpiration) isV2FileContractResolution() {}
 
 // A V2FileContractRenewal renews a file contract.
 type V2FileContractRenewal struct {
-	FinalRevision  V2FileContract `json:"finalRevision"`
-	NewContract    V2FileContract `json:"newContract"`
-	RenterRollover Currency       `json:"renterRollover"`
-	HostRollover   Currency       `json:"hostRollover"`
+	FinalRenterOutput SiacoinOutput  `json:"finalRenterOutput"`
+	FinalHostOutput   SiacoinOutput  `json:"finalHostOutput"`
+	RenterRollover    Currency       `json:"renterRollover"`
+	HostRollover      Currency       `json:"hostRollover"`
+	NewContract       V2FileContract `json:"newContract"`
 
 	// signatures cover above fields
 	RenterSignature Signature `json:"renterSignature"`
@@ -641,7 +636,7 @@ type SiafundElement struct {
 	ID            SiafundOutputID `json:"id"`
 	StateElement  StateElement    `json:"stateElement"`
 	SiafundOutput SiafundOutput   `json:"siafundOutput"`
-	ClaimStart    Currency        `json:"claimStart"` // value of SiafundPool when element was created
+	ClaimStart    Currency        `json:"claimStart"` // value of SiafundTaxRevenue when element was created
 }
 
 // A FileContractElement is a record of a FileContract within the state
@@ -804,7 +799,26 @@ type V2BlockData struct {
 	Transactions []V2Transaction `json:"transactions"`
 }
 
-// A Block is a set of transactions grouped under a header.
+// A BlockHeader is the preimage of a Block's ID.
+type BlockHeader struct {
+	ParentID   BlockID   `json:"parentID"`
+	Nonce      uint64    `json:"nonce"`
+	Timestamp  time.Time `json:"timestamp"`
+	Commitment Hash256   `json:"commitment"`
+}
+
+// ID returns the hash of the header data.
+func (bh BlockHeader) ID() BlockID {
+	buf := make([]byte, 32+8+8+32)
+	copy(buf[:32], bh.ParentID[:])
+	binary.LittleEndian.PutUint64(buf[32:], bh.Nonce)
+	binary.LittleEndian.PutUint64(buf[40:], uint64(bh.Timestamp.Unix()))
+	copy(buf[48:], bh.Commitment[:])
+	return BlockID(HashBytes(buf))
+}
+
+// A Block is a timestamped set of transactions, immutably linked to a previous
+// block, secured by proof-of-work.
 type Block struct {
 	ParentID     BlockID         `json:"parentID"`
 	Nonce        uint64          `json:"nonce"`
@@ -815,12 +829,6 @@ type Block struct {
 	V2 *V2BlockData `json:"v2,omitempty"`
 }
 
-// MerkleRoot returns the Merkle root of the block's miner payouts and
-// transactions.
-func (b *Block) MerkleRoot() Hash256 {
-	return blockMerkleRoot(b.MinerPayouts, b.Transactions)
-}
-
 // V2Transactions returns the block's v2 transactions, if present.
 func (b *Block) V2Transactions() []V2Transaction {
 	if b.V2 != nil {
@@ -829,20 +837,26 @@ func (b *Block) V2Transactions() []V2Transaction {
 	return nil
 }
 
+// Header returns the block's header.
+func (b *Block) Header() BlockHeader {
+	var commitment Hash256
+	if b.V2 == nil {
+		// NOTE: expensive!
+		commitment = blockMerkleRoot(b.MinerPayouts, b.Transactions)
+	} else {
+		commitment = b.V2.Commitment
+	}
+	return BlockHeader{
+		ParentID:   b.ParentID,
+		Nonce:      b.Nonce,
+		Timestamp:  b.Timestamp,
+		Commitment: commitment,
+	}
+}
+
 // ID returns a hash that uniquely identifies a block.
 func (b *Block) ID() BlockID {
-	buf := make([]byte, 32+8+8+32)
-	binary.LittleEndian.PutUint64(buf[32:], b.Nonce)
-	binary.LittleEndian.PutUint64(buf[40:], uint64(b.Timestamp.Unix()))
-	if b.V2 != nil {
-		copy(buf[:32], "sia/id/block|")
-		copy(buf[48:], b.V2.Commitment[:])
-	} else {
-		root := b.MerkleRoot() // NOTE: expensive!
-		copy(buf[:32], b.ParentID[:])
-		copy(buf[48:], root[:])
-	}
-	return BlockID(HashBytes(buf))
+	return b.Header().ID()
 }
 
 func unmarshalHex(dst []byte, data []byte) error {
