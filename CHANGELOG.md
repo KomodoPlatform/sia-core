@@ -1,3 +1,9 @@
+## 0.9.1 (2025-01-20)
+
+### Fixes
+
+- Include storage cost in renter renewal cost
+
 ## 0.9.0 (2024-12-18)
 
 ### Breaking Changes
