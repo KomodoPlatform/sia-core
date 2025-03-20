@@ -1,3 +1,9 @@
+## 0.10.5 (2025-03-20)
+
+### Fixes
+
+- Fixed an issue with memory aliasing of merkle proofs
+
 ## 0.10.4 (2025-03-10)
 
 ### Fixes
