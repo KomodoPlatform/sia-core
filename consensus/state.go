@@ -615,6 +615,19 @@ type FileContractElementDiff struct {
 	Valid    bool                `json:"valid"`
 }
 
+// RevisionElement returns the revision, if present, as a FileContractElement.
+// It returns a boolean indicating whether the revision exists or not.
+func (diff FileContractElementDiff) RevisionElement() (types.FileContractElement, bool) {
+	if diff.Revision == nil {
+		return types.FileContractElement{}, false
+	}
+	return types.FileContractElement{
+		ID:           diff.FileContractElement.ID,
+		StateElement: diff.FileContractElement.StateElement,
+		FileContract: *diff.Revision,
+	}, true
+}
+
 // A V2FileContractElementDiff is a V2FileContractElement that was created,
 // revised, and/or resolved within a block. Note that, within a block, a v2
 // contract may be both created and revised, or revised and resolved, but not
@@ -627,6 +640,20 @@ type V2FileContractElementDiff struct {
 	Revision *types.V2FileContract `json:"revision"`
 	// Non-nil if the contract was resolved.
 	Resolution types.V2FileContractResolutionType `json:"resolution"`
+}
+
+// V2RevisionElement returns the revision, if present, as a
+// V2FileContractElement.  It returns a boolean indicating whether the revision
+// exists or not.
+func (diff V2FileContractElementDiff) V2RevisionElement() (types.V2FileContractElement, bool) {
+	if diff.Revision == nil {
+		return types.V2FileContractElement{}, false
+	}
+	return types.V2FileContractElement{
+		ID:             diff.V2FileContractElement.ID,
+		StateElement:   diff.V2FileContractElement.StateElement,
+		V2FileContract: *diff.Revision,
+	}, true
 }
 
 // A MidState represents the state of the chain within a block.
@@ -673,10 +700,9 @@ func (ms *MidState) siafundElement(ts V1TransactionSupplement, id types.SiafundO
 
 func (ms *MidState) fileContractElement(ts V1TransactionSupplement, id types.FileContractID) (types.FileContractElement, bool) {
 	if i, ok := ms.elements[id]; ok {
-		if ms.fces[i].Revision != nil {
-			fce := ms.fces[i].FileContractElement
-			fce.FileContract = *ms.fces[i].Revision
-			return fce, true
+		rev, ok := ms.fces[i].RevisionElement()
+		if ok {
+			return rev, ok
 		}
 		return ms.fces[i].FileContractElement, true
 	}

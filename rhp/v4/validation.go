@@ -249,3 +249,48 @@ func (req *RPCAppendSectorsRequest) Validate(pk types.PublicKey) error {
 	}
 	return nil
 }
+
+// Validate checks that the request is valid
+func (req *RPCFundAccountsRequest) Validate() error {
+	switch {
+	case req.ContractID == (types.FileContractID{}):
+		return errors.New("contract ID must be set")
+	case req.RenterSignature == (types.Signature{}):
+		return errors.New("renter signature must be set")
+	case len(req.Deposits) == 0:
+		return errors.New("no deposits to fund")
+	case len(req.Deposits) > MaxAccountBatchSize:
+		return fmt.Errorf("too many deposits to fund: %d > %d", len(req.Deposits), MaxAccountBatchSize)
+	}
+	for i, deposit := range req.Deposits {
+		switch {
+		case deposit.Account == (Account{}):
+			return fmt.Errorf("deposit %d has no account", i)
+		case deposit.Amount.IsZero():
+			return fmt.Errorf("deposit %d has no amount", i)
+		}
+	}
+	return nil
+}
+
+// Validate checks that the request is valid
+func (req *RPCReplenishAccountsRequest) Validate() error {
+	switch {
+	case req.ContractID == (types.FileContractID{}):
+		return errors.New("contract ID must be set")
+	case req.ChallengeSignature == (types.Signature{}):
+		return errors.New("challenge signature must be set")
+	case len(req.Accounts) == 0:
+		return errors.New("no accounts to replenish")
+	case len(req.Accounts) > MaxAccountBatchSize:
+		return fmt.Errorf("too many accounts to replenish: %d > %d", len(req.Accounts), MaxAccountBatchSize)
+	case req.Target.IsZero():
+		return errors.New("target must be greater than zero")
+	}
+	for i, account := range req.Accounts {
+		if account == (Account{}) {
+			return fmt.Errorf("account %d is empty", i)
+		}
+	}
+	return nil
+}

@@ -25,25 +25,32 @@ const (
 	// number of sectors removed in a single RPC free call.
 	MaxSectorBatchSize = (1 << 40) / (SectorSize)
 
+	// MaxAccountBatchSize is the number of account operations that can be batched into a single RPC.
+	MaxAccountBatchSize = 1000
+
 	// SectorSize is the size of one sector in bytes.
 	SectorSize = 1 << 22 // 4 MiB
 )
 
 // RPC identifiers.
 var (
-	RPCAccountBalanceID  = types.NewSpecifier("AccountBalance")
+	RPCAccountBalanceID    = types.NewSpecifier("AccountBalance")
+	RPCFundAccountsID      = types.NewSpecifier("FundAccounts")
+	RPCReplenishAccountsID = types.NewSpecifier("ReplAccounts")
+
+	RPCAppendSectorsID = types.NewSpecifier("AppendSectors")
+	RPCFreeSectorsID   = types.NewSpecifier("FreeSectors")
+	RPCSectorRootsID   = types.NewSpecifier("SectorRoots")
+
 	RPCFormContractID    = types.NewSpecifier("FormContract")
-	RPCFundAccountsID    = types.NewSpecifier("FundAccounts")
 	RPCLatestRevisionID  = types.NewSpecifier("LatestRevision")
-	RPCAppendSectorsID   = types.NewSpecifier("AppendSectors")
-	RPCFreeSectorsID     = types.NewSpecifier("FreeSectors")
-	RPCReadSectorID      = types.NewSpecifier("ReadSector")
-	RPCRenewContractID   = types.NewSpecifier("RenewContract")
 	RPCRefreshContractID = types.NewSpecifier("RefreshContract")
-	RPCSectorRootsID     = types.NewSpecifier("SectorRoots")
-	RPCSettingsID        = types.NewSpecifier("Settings")
-	RPCWriteSectorID     = types.NewSpecifier("WriteSector")
-	RPCVerifySectorID    = types.NewSpecifier("VerifySector")
+	RPCRenewContractID   = types.NewSpecifier("RenewContract")
+
+	RPCReadSectorID   = types.NewSpecifier("ReadSector")
+	RPCWriteSectorID  = types.NewSpecifier("WriteSector")
+	RPCVerifySectorID = types.NewSpecifier("VerifySector")
+	RPCSettingsID     = types.NewSpecifier("Settings")
 )
 
 func round4KiB(n uint64) uint64 {
@@ -85,16 +92,43 @@ func (u Usage) Add(b Usage) Usage {
 // HostPrices specify a time-bound set of parameters used to calculate the cost
 // of various RPCs.
 type HostPrices struct {
-	ContractPrice   types.Currency `json:"contractPrice"`
-	Collateral      types.Currency `json:"collateral"`
-	StoragePrice    types.Currency `json:"storagePrice"`
-	IngressPrice    types.Currency `json:"ingressPrice"`
-	EgressPrice     types.Currency `json:"egressPrice"`
+	// ContractPrice is the base cost to the renter for forming,
+	// renewing, or refreshing a contract. It is paid up front and
+	// covers the cost of the revision and storage proof transaction
+	// the host broadcasts at the end of the contract.
+	ContractPrice types.Currency `json:"contractPrice"`
+	// Collateral is the amount of Hastings the host will risk
+	// per byte of storage per block. This is used by the renter
+	// when revising a contract during RPCAppendSectors.
+	Collateral types.Currency `json:"collateral"`
+	// StoragePrice is the cost per byte of storage per block.
+	// This is used by the renter when revising a contract during
+	// RPCAppendSectors and RPCWriteSectors.
+	StoragePrice types.Currency `json:"storagePrice"`
+	// IngressPrice is the cost per byte of data uploaded to the host.
+	// This is used by the renter to calculate the cost of bandwidth
+	// when uploading to the host.
+	IngressPrice types.Currency `json:"ingressPrice"`
+	// EgressPrice is the cost per byte of data downloaded from the host.
+	// This is used by the renter to calculate the cost of bandwidth
+	// when downloading from the host.
+	EgressPrice types.Currency `json:"egressPrice"`
+	// FreeSectorPrice is the base cost to remove a single sector
+	// from a contract. It is used by the renter to calculate the
+	// cost of RPCFreeSectors.
 	FreeSectorPrice types.Currency `json:"freeSectorPrice"`
-	TipHeight       uint64         `json:"tipHeight"`
-	ValidUntil      time.Time      `json:"validUntil"`
+	// TipHeight is the height the renter should use when calculating
+	// the remaining duration of a contract. It is important that the
+	// host and renter agree on the remaining duration so that cost
+	// calculation is consistent for both parties.
+	TipHeight uint64 `json:"tipHeight"`
+	// ValidUntil is the time at which these prices will no longer
+	// be honored. The renter should get an updated set of prices
+	// before this time.
+	ValidUntil time.Time `json:"validUntil"`
 
-	// covers above fields
+	// Signature is a signed hash of the above fields. The host will
+	// check this signature before honoring any prices.
 	Signature types.Signature `json:"signature"`
 }
 
@@ -458,6 +492,26 @@ type (
 		Balance types.Currency `json:"balance"`
 	}
 
+	// RPCReplenishAccountsRequest is the request type for RPCReplenishAccounts.
+	RPCReplenishAccountsRequest struct {
+		Accounts           []Account            `json:"accounts"`
+		Target             types.Currency       `json:"target"`
+		ContractID         types.FileContractID `json:"contractID"`
+		ChallengeSignature types.Signature      `json:"challengeSignature"`
+	}
+	// RPCReplenishAccountsResponse is the response type for RPCReplenishAccounts.
+	RPCReplenishAccountsResponse struct {
+		Deposits []AccountDeposit `json:"deposits"`
+	}
+	// RPCReplenishAccountsSecondResponse is the second response type for RPCReplenishAccounts.
+	RPCReplenishAccountsSecondResponse struct {
+		RenterSignature types.Signature `json:"renterSignature"`
+	}
+	// RPCReplenishAccountsThirdResponse is the third response type for RPCReplenishAccounts.
+	RPCReplenishAccountsThirdResponse struct {
+		HostSignature types.Signature `json:"hostSignature"`
+	}
+
 	// RPCVerifySectorRequest implements Object.
 	RPCVerifySectorRequest struct {
 		Prices    HostPrices    `json:"prices"`
@@ -545,6 +599,30 @@ func (r *RPCRefreshContractRequest) ChallengeSigHash(lastRevisionNumber uint64) 
 // ValidChallengeSignature checks the challenge signature for validity.
 func (r *RPCRefreshContractRequest) ValidChallengeSignature(existing types.V2FileContract) bool {
 	return existing.RenterPublicKey.VerifyHash(r.ChallengeSigHash(existing.RevisionNumber), r.ChallengeSignature)
+}
+
+// ChallengeSigHash returns the hash of the challenge signature used for
+// signing.
+func (r *RPCReplenishAccountsRequest) ChallengeSigHash(revisionNumber uint64) types.Hash256 {
+	h := types.NewHasher()
+	types.EncodeSlice(h.E, r.Accounts)
+	types.V2Currency(r.Target).EncodeTo(h.E)
+	r.ContractID.EncodeTo(h.E)
+	h.E.WriteUint64(revisionNumber)
+	return h.Sum()
+}
+
+// ValidChallengeSignature checks the challenge signature for validity.
+func (r *RPCReplenishAccountsRequest) ValidChallengeSignature(fc types.V2FileContract) bool {
+	return fc.RenterPublicKey.VerifyHash(r.ChallengeSigHash(fc.RevisionNumber), r.ChallengeSignature)
+}
+
+// TotalCost returns the total cost to the renter of the replenish RPC.
+func (r *RPCReplenishAccountsResponse) TotalCost() (total types.Currency) {
+	for _, deposit := range r.Deposits {
+		total = total.Add(deposit.Amount)
+	}
+	return
 }
 
 // NewContract creates a new file contract with the given settings.
@@ -651,6 +729,13 @@ func ReviseForSectorRoots(fc types.V2FileContract, prices HostPrices, numRoots u
 
 // ReviseForFundAccounts creates a contract revision for the fund accounts RPC
 func ReviseForFundAccounts(fc types.V2FileContract, amount types.Currency) (types.V2FileContract, Usage, error) {
+	usage := Usage{AccountFunding: amount}
+	err := PayWithContract(&fc, usage)
+	return fc, usage, err
+}
+
+// ReviseForReplenish creates a contract revision for the replenish accounts RPC
+func ReviseForReplenish(fc types.V2FileContract, amount types.Currency) (types.V2FileContract, Usage, error) {
 	usage := Usage{AccountFunding: amount}
 	err := PayWithContract(&fc, usage)
 	return fc, usage, err
