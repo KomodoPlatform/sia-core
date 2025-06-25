@@ -10,15 +10,17 @@ import (
 	"sync"
 	"time"
 
-	"go.sia.tech/core/internal/blake2b"
+	"go.sia.tech/core/blake2b"
 	"go.sia.tech/core/types"
 )
+
+const commitmentDistinguisher = "commitment"
 
 // Pool for reducing heap allocations when hashing. This is only necessary
 // because blake2b.New256 returns a hash.Hash interface, which prevents the
 // compiler from doing escape analysis. Can be removed if we switch to an
 // implementation whose constructor returns a concrete type.
-var hasherPool = &sync.Pool{New: func() interface{} { return types.NewHasher() }}
+var hasherPool = &sync.Pool{New: func() any { return types.NewHasher() }}
 
 func hashAll(elems ...interface{}) [32]byte {
 	h := hasherPool.Get().(*types.Hasher)
@@ -530,26 +532,40 @@ func (s State) PartialSigHash(txn types.Transaction, cf types.CoveredFields) typ
 	return h.Sum()
 }
 
-// TransactionsCommitment returns the commitment hash covering the transactions
-// that comprise a child block.
-func (s State) TransactionsCommitment(txns []types.Transaction, v2txns []types.V2Transaction) types.Hash256 {
-	var acc blake2b.Accumulator
-	for _, txn := range txns {
-		acc.AddLeaf(txn.FullHash())
-	}
-	for _, txn := range v2txns {
-		acc.AddLeaf(txn.FullHash())
-	}
-	return acc.Root()
+// MerkleLeafHash computes the hash of the state to be used as the
+// first leaf in the Commitment Merkle tree.
+func (s State) MerkleLeafHash(minerAddr types.Address) types.Hash256 {
+	h := hasherPool.Get().(*types.Hasher)
+	defer hasherPool.Put(h)
+
+	h.Reset()
+	// the parent state is first hashed separately
+	s.EncodeTo(h.E)
+	stateHash := h.Sum()
+
+	// build the leaf hash
+	h.Reset()
+	h.E.WriteUint8(leafHashPrefix)
+	h.WriteDistinguisher(commitmentDistinguisher) // hashed as []byte("sia/commitment|")
+	h.E.WriteUint8(s.v2ReplayPrefix())
+	stateHash.EncodeTo(h.E)
+	minerAddr.EncodeTo(h.E)
+
+	return h.Sum()
 }
 
 // Commitment computes the commitment hash for a child block with the given
 // transactions and miner address.
-func (s State) Commitment(txnsHash types.Hash256, minerAddr types.Address) types.Hash256 {
-	// NOTE: The state is hashed separately so that miners don't have to rehash
-	// it every time the transaction set changes
-	stateHash := types.Hash256(hashAll(s))
-	return hashAll("commitment", s.v2ReplayPrefix(), stateHash, minerAddr, txnsHash)
+func (s State) Commitment(minerAddr types.Address, txns []types.Transaction, v2txns []types.V2Transaction) types.Hash256 {
+	var acc blake2b.Accumulator
+	acc.AddLeaf(s.MerkleLeafHash(minerAddr))
+	for _, txn := range txns {
+		acc.AddLeaf(txn.MerkleLeafHash())
+	}
+	for _, txn := range v2txns {
+		acc.AddLeaf(txn.MerkleLeafHash())
+	}
+	return acc.Root()
 }
 
 // InputSigHash returns the hash that must be signed for each v2 transaction input.
@@ -616,14 +632,15 @@ type FileContractElementDiff struct {
 }
 
 // RevisionElement returns the revision, if present, as a FileContractElement.
-// It returns a boolean indicating whether the revision exists or not.
+// It returns a boolean indicating whether the revision exists or not. The
+// element's memory is shared.
 func (diff FileContractElementDiff) RevisionElement() (types.FileContractElement, bool) {
 	if diff.Revision == nil {
 		return types.FileContractElement{}, false
 	}
 	return types.FileContractElement{
 		ID:           diff.FileContractElement.ID,
-		StateElement: diff.FileContractElement.StateElement,
+		StateElement: diff.FileContractElement.StateElement.Share(),
 		FileContract: *diff.Revision,
 	}, true
 }
@@ -643,15 +660,15 @@ type V2FileContractElementDiff struct {
 }
 
 // V2RevisionElement returns the revision, if present, as a
-// V2FileContractElement.  It returns a boolean indicating whether the revision
-// exists or not.
+// V2FileContractElement. It returns a boolean indicating whether the revision
+// exists or not. The element's memory is shared.
 func (diff V2FileContractElementDiff) V2RevisionElement() (types.V2FileContractElement, bool) {
 	if diff.Revision == nil {
 		return types.V2FileContractElement{}, false
 	}
 	return types.V2FileContractElement{
 		ID:             diff.V2FileContractElement.ID,
-		StateElement:   diff.V2FileContractElement.StateElement,
+		StateElement:   diff.V2FileContractElement.StateElement.Share(),
 		V2FileContract: *diff.Revision,
 	}, true
 }

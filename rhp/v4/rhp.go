@@ -16,6 +16,10 @@ const (
 	// the contract expires.
 	ProofWindow = 144 // 24 hours
 
+	// MinContractDuration is the minimum duration, in blocks, a host will
+	// accept for a contract.
+	MinContractDuration = 18 // 3 hours
+
 	// TempSectorDuration is the number of blocks that temp sectors are expected to be stored
 	// before being removed
 	TempSectorDuration = 144 * 3
@@ -86,6 +90,18 @@ func (u Usage) Add(b Usage) Usage {
 		Ingress:          u.Ingress.Add(b.Ingress),
 		AccountFunding:   u.AccountFunding.Add(b.AccountFunding),
 		RiskedCollateral: u.RiskedCollateral.Add(b.RiskedCollateral),
+	}
+}
+
+// Mul returns the product of a Usage and a scalar.
+func (u Usage) Mul(n uint64) Usage {
+	return Usage{
+		RPC:              u.RPC.Mul64(n),
+		Storage:          u.Storage.Mul64(n),
+		Egress:           u.Egress.Mul64(n),
+		Ingress:          u.Ingress.Mul64(n),
+		AccountFunding:   u.AccountFunding.Mul64(n),
+		RiskedCollateral: u.RiskedCollateral.Mul64(n),
 	}
 }
 
@@ -196,15 +212,32 @@ func (hp HostPrices) SigHash() types.Hash256 {
 
 // HostSettings specify the settings of a host.
 type HostSettings struct {
-	ProtocolVersion     [3]uint8       `json:"protocolVersion"`
-	Release             string         `json:"release"`
-	WalletAddress       types.Address  `json:"walletAddress"`
-	AcceptingContracts  bool           `json:"acceptingContracts"`
-	MaxCollateral       types.Currency `json:"maxCollateral"`
-	MaxContractDuration uint64         `json:"maxContractDuration"`
-	RemainingStorage    uint64         `json:"remainingStorage"`
-	TotalStorage        uint64         `json:"totalStorage"`
-	Prices              HostPrices     `json:"prices"`
+	// ProtocolVersion is the version of RHP4 the host supports
+	ProtocolVersion [3]uint8 `json:"protocolVersion"`
+	// Release identifies the software release of the host
+	Release string `json:"release"`
+	// WalletAddress is the address the host uses to receive payments.
+	// It is used when forming and renewing contracts.
+	WalletAddress types.Address `json:"walletAddress"`
+	// AcceptingContracts indicates whether the host is currently accepting
+	// new contracts.
+	AcceptingContracts bool `json:"acceptingContracts"`
+	// MaxCollateral is the maximum amount of collateral, in hastings, the host will allow
+	// in a single contract.
+	MaxCollateral types.Currency `json:"maxCollateral"`
+	// MaxContractDuration is the maximum duration, in blocks, the host will
+	// allow for a contract.
+	MaxContractDuration uint64 `json:"maxContractDuration"`
+	// RemainingStorage is the amount of storage, in sectors, the host has
+	// remaining.
+	RemainingStorage uint64 `json:"remainingStorage"`
+	// TotalStorage is the total amount of storage, in sectors, the host has
+	// available.
+	TotalStorage uint64 `json:"totalStorage"`
+	// Prices are a set of time-bound parameters used to calculate the cost
+	// of various RPCs. The prices are signed by the host to prevent the renter
+	// from tampering with them.
+	Prices HostPrices `json:"prices"`
 }
 
 // An Account represents an ephemeral balance that can be funded via contract
@@ -651,14 +684,15 @@ func NewContract(p HostPrices, cp RPCFormContractParams, hostKey types.PublicKey
 }
 
 // ContractCost calculates the cost to the host and renter for forming a contract.
-func ContractCost(cs consensus.State, p HostPrices, fc types.V2FileContract, minerFee types.Currency) (renter, host types.Currency) {
-	renter = fc.RenterOutput.Value.Add(p.ContractPrice).Add(minerFee).Add(cs.V2FileContractTax(fc))
+func ContractCost(cs consensus.State, fc types.V2FileContract, minerFee types.Currency) (renter, host types.Currency) {
+	contractCost := fc.HostOutput.Value.Sub(fc.TotalCollateral) // (contract price + locked collateral) - locked collateral
+	renter = fc.RenterOutput.Value.Add(contractCost).Add(minerFee).Add(cs.V2FileContractTax(fc))
 	host = fc.TotalCollateral
 	return
 }
 
 // RenewalCost calculates the cost to the host and renter for renewing a contract.
-func RenewalCost(cs consensus.State, p HostPrices, r types.V2FileContractRenewal, minerFee types.Currency) (renter, host types.Currency) {
+func RenewalCost(cs consensus.State, r types.V2FileContractRenewal, minerFee types.Currency) (renter, host types.Currency) {
 	contractCost := r.NewContract.HostOutput.Value.Sub(r.NewContract.TotalCollateral) // (contract price + storage cost + locked collateral) - locked collateral
 	renter = r.NewContract.RenterOutput.Value.Add(contractCost).Add(minerFee).Add(cs.V2FileContractTax(r.NewContract)).Sub(r.RenterRollover)
 	host = r.NewContract.TotalCollateral.Sub(r.HostRollover)
@@ -667,10 +701,11 @@ func RenewalCost(cs consensus.State, p HostPrices, r types.V2FileContractRenewal
 
 // RefreshCost calculates the cost to the host and renter for refreshing a contract.
 func RefreshCost(cs consensus.State, p HostPrices, r types.V2FileContractRenewal, minerFee types.Currency) (renter, host types.Currency) {
+	// Unlike renewals, it is not possible to calculate the renter's cost of the contract during refreshes without the host's prices
+	// because the existing renter and host outputs are rolled into the new contract to ensure the existing data
+	// is still covered by collateral.
 	renter = r.NewContract.RenterOutput.Value.Add(p.ContractPrice).Add(minerFee).Add(cs.V2FileContractTax(r.NewContract)).Sub(r.RenterRollover)
-	// the calculation is different from renewal because the host's revenue is also rolled into the refresh.
-	// This calculates the new collateral the host is expected to put up:
-	// new collateral = (new revenue + existing revenue + new collateral + existing collateral) - new revenue - (existing revenue + existing collateral)
+	// new collateral = (contract price + new collateral + existing revenue + existing collateral) - contract price - (existing revenue + existing collateral)
 	host = r.NewContract.HostOutput.Value.Sub(p.ContractPrice).Sub(r.HostRollover)
 	return
 }
@@ -743,9 +778,22 @@ func ReviseForReplenish(fc types.V2FileContract, amount types.Currency) (types.V
 
 // MinRenterAllowance returns the minimum allowance required to justify the given
 // host collateral.
-func MinRenterAllowance(hp HostPrices, duration uint64, collateral types.Currency) types.Currency {
-	maxCollateralBytes := collateral.Div(hp.Collateral).Div64(duration)
-	return hp.StoragePrice.Mul64(duration).Mul(maxCollateralBytes)
+func MinRenterAllowance(hp HostPrices, collateral types.Currency) types.Currency {
+	if hp.Collateral.IsZero() {
+		return types.ZeroCurrency
+	}
+	maxCollateralBytes := collateral.Div(hp.Collateral)
+	return hp.StoragePrice.Mul(maxCollateralBytes)
+}
+
+// MaxHostCollateral returns the maximum amount of collateral a host can justify
+// to put into a contract for the given allowance.
+func MaxHostCollateral(hp HostPrices, allowance types.Currency) types.Currency {
+	if hp.StoragePrice.IsZero() {
+		return types.MaxCurrency
+	}
+	maxCollateralBytes := allowance.Div(hp.StoragePrice)
+	return hp.Collateral.Mul(maxCollateralBytes)
 }
 
 // RenewContract creates a contract renewal for the renew RPC

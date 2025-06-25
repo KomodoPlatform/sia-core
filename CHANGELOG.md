@@ -1,3 +1,76 @@
+## 0.14.0 (2025-06-16)
+
+### Breaking Changes
+
+- Drop support for v1 peers in p2p code.
+
+## 0.13.2 (2025-06-14)
+
+### Features
+
+- Add (ElementAccumulator).ValidateTransactionElements
+
+## 0.13.1 (2025-05-26)
+
+### Features
+
+- Added State.MerkleLeafHash helper.
+
+## 0.13.0 (2025-05-26)
+
+### Breaking Changes
+
+- Fixed missing leaf prefix in commitment hash.
+
+## 0.12.4 (2025-05-21)
+
+### Features
+
+- Moved blake2b package out of internal.
+
+## 0.12.3 (2025-05-14)
+
+### Fixes
+
+- Added convenience IDs to V2 transaction JSON marshalling.
+
+## 0.12.2 (2025-05-14)
+
+### Features
+
+- Added UTXO IDs to v1 transaction JSON marshalling
+
+## 0.12.1 (2025-05-14)
+
+### Features
+
+- Adds an `address` field to the JSON representation of Siacoin and Siafund inputs.
+
+## 0.12.0 (2025-04-28)
+
+### Breaking Changes
+
+- Changed contract validation helpers to take current contract as parameter instead of individual values to simplify usage
+- Removed unused parameters in contract helpers
+
+## 0.11.0 (2025-04-17)
+
+### Breaking Changes
+
+- Removed `duration` parameter from MinRenterAllowance helper
+
+### Fixes
+
+- Add MaxHostCollateral helper
+- Consider post-refresh values for the minRenterAllowance check rather than the additional values.
+
+## 0.10.5 (2025-03-28)
+
+### Fixes
+
+- Add Mul helper to Usage type
+- Fixed an issue with memory aliasing of merkle proofs
+
 ## 0.10.4 (2025-03-10)
 
 ### Fixes

@@ -114,6 +114,9 @@ func (req *RPCFormContractRequest) Validate(pk types.PublicKey, tip types.ChainI
 		return fmt.Errorf("prices are invalid: %w", err)
 	}
 
+	minProofHeight := minProofHeight(tip, req.Prices)
+	maxExpirationHeight := req.Prices.TipHeight + maxDuration
+	expirationHeight := req.Contract.ProofHeight + ProofWindow
 	// validate the request fields
 	switch {
 	case req.MinerFee.IsZero():
@@ -122,19 +125,20 @@ func (req *RPCFormContractRequest) Validate(pk types.PublicKey, tip types.ChainI
 		return errors.New("basis must be set")
 	case len(req.RenterInputs) == 0:
 		return errors.New("renter inputs must not be empty")
+	case req.Contract.ProofHeight < minProofHeight:
+		return fmt.Errorf("proof height must be greater than %v", minProofHeight)
+	case expirationHeight > maxExpirationHeight:
+		return fmt.Errorf("expiration height %v exceeds max expiration height %v", expirationHeight, maxExpirationHeight)
 	}
 
 	// validate the contract fields
 	hp := req.Prices
-	expirationHeight := req.Contract.ProofHeight + ProofWindow
 	duration := expirationHeight - hp.TipHeight
 	// calculate the minimum allowance required for the contract based on the
-	// host's locked collateral and the contract duration
-	minRenterAllowance := MinRenterAllowance(hp, duration, req.Contract.Collateral)
+	// host's locked collateral
+	minRenterAllowance := MinRenterAllowance(hp, req.Contract.Collateral)
 
 	switch {
-	case expirationHeight <= tip.Height: // must be validated against tip instead of prices
-		return errors.New("contract expiration height is in the past")
 	case req.Contract.Allowance.IsZero():
 		return errors.New("allowance must be greater than zero")
 	case req.Contract.Collateral.Cmp(maxCollateral) > 0:
@@ -149,42 +153,45 @@ func (req *RPCFormContractRequest) Validate(pk types.PublicKey, tip types.ChainI
 }
 
 // Validate validates a renew contract request. Prices are not validated
-func (req *RPCRenewContractRequest) Validate(pk types.PublicKey, tip types.ChainIndex, existingSize uint64, existingProofHeight uint64, maxCollateral types.Currency, maxDuration uint64) error {
+func (req *RPCRenewContractRequest) Validate(pk types.PublicKey, tip types.ChainIndex, existing types.V2FileContract, maxCollateral types.Currency, maxDuration uint64) error {
 	if err := req.Prices.Validate(pk); err != nil {
 		return fmt.Errorf("prices are invalid: %w", err)
 	}
 
+	// calculate the minimum proof height for the renewal.
+	minProofHeight := minProofHeight(tip, req.Prices)
+	maxExpirationHeight := req.Prices.TipHeight + maxDuration
+	expirationHeight := req.Renewal.ProofHeight + ProofWindow
 	// validate the request fields
 	switch {
 	case req.MinerFee.IsZero():
 		return errors.New("miner fee must be greater than 0")
 	case req.Basis == (types.ChainIndex{}):
 		return errors.New("basis must be set")
-	case req.Renewal.ProofHeight <= existingProofHeight:
-		return fmt.Errorf("renewal proof height must be greater than existing proof height %v", existingProofHeight)
+	case req.Renewal.ProofHeight <= existing.ProofHeight:
+		return fmt.Errorf("renewal proof height must be greater than existing proof height %v", existing.ProofHeight)
+	case req.Renewal.ProofHeight < minProofHeight:
+		return fmt.Errorf("renewal proof height must be at least %v", minProofHeight)
+	case expirationHeight > maxExpirationHeight:
+		return fmt.Errorf("renewal expiration height %v exceeds max expiration height %v", expirationHeight, maxExpirationHeight)
 	}
 
 	// validate the contract fields
 	hp := req.Prices
-	expirationHeight := req.Renewal.ProofHeight + ProofWindow
 	duration := expirationHeight - hp.TipHeight
 	// calculate the minimum allowance required for the contract based on the
 	// host's locked collateral and the contract duration
-	minRenterAllowance := MinRenterAllowance(hp, duration, req.Renewal.Collateral)
+	minRenterAllowance := MinRenterAllowance(hp, req.Renewal.Collateral)
 	// collateral is risked for the entire contract duration
-	riskedCollateral := req.Prices.Collateral.Mul64(existingSize).Mul64(expirationHeight - req.Prices.TipHeight)
+	riskedCollateral := req.Prices.Collateral.Mul64(existing.Filesize).Mul64(duration)
 	// renewals add collateral on top of the required risked collateral
 	totalCollateral := req.Renewal.Collateral.Add(riskedCollateral)
 
 	switch {
-	case expirationHeight <= tip.Height: // must be validated against tip instead of prices
-		return errors.New("contract expiration height is in the past")
 	case req.Renewal.Allowance.IsZero():
 		return errors.New("allowance must be greater than zero")
 	case totalCollateral.Cmp(maxCollateral) > 0:
 		return fmt.Errorf("required collateral %v exceeds max collateral %v", totalCollateral, maxCollateral)
-	case duration > maxDuration:
-		return fmt.Errorf("contract duration %v exceeds max duration %v", duration, maxDuration)
 	case req.Renewal.Allowance.Cmp(minRenterAllowance) < 0:
 		return fmt.Errorf("allowance %v is less than minimum allowance %v", req.Renewal.Allowance, minRenterAllowance)
 	default:
@@ -192,35 +199,37 @@ func (req *RPCRenewContractRequest) Validate(pk types.PublicKey, tip types.Chain
 	}
 }
 
-// Validate validates a refresh contract request. Prices are not validated
-func (req *RPCRefreshContractRequest) Validate(pk types.PublicKey, existingTotalCollateral types.Currency, expirationHeight uint64, maxCollateral types.Currency) error {
+// Validate validates a refresh contract request against the existing contract.
+func (req *RPCRefreshContractRequest) Validate(pk types.PublicKey, tip types.ChainIndex, existing types.V2FileContract, maxCollateral types.Currency) error {
 	if err := req.Prices.Validate(pk); err != nil {
 		return fmt.Errorf("prices are invalid: %w", err)
 	}
 
 	// validate the request fields
+	minProofHeight := minProofHeight(tip, req.Prices)
 	switch {
 	case req.MinerFee.IsZero():
 		return errors.New("miner fee must be greater than 0")
 	case req.Basis == (types.ChainIndex{}):
 		return errors.New("basis must be set")
+	case existing.ProofHeight <= minProofHeight:
+		return fmt.Errorf("contract too close to proof window %v", existing.ProofHeight)
 	}
 
 	// validate the contract fields
 	hp := req.Prices
 	// calculate the minimum allowance required for the contract based on the
-	// host's locked collateral and the contract duration
-	minRenterAllowance := MinRenterAllowance(hp, expirationHeight-req.Prices.TipHeight, req.Refresh.Collateral)
-	// refreshes add collateral on top of the existing collateral
-	totalCollateral := req.Refresh.Collateral.Add(existingTotalCollateral)
+	// host's locked collateral
+	minRenterAllowance := MinRenterAllowance(hp, req.Refresh.Collateral)
+	totalHostCollateral := existing.TotalCollateral.Add(req.Refresh.Collateral)
 
 	switch {
 	case req.Refresh.Allowance.IsZero():
 		return errors.New("allowance must be greater than zero")
-	case totalCollateral.Cmp(maxCollateral) > 0:
-		return fmt.Errorf("required collateral %v exceeds max collateral %v", totalCollateral, maxCollateral)
 	case req.Refresh.Allowance.Cmp(minRenterAllowance) < 0:
-		return fmt.Errorf("allowance %v is less than minimum allowance %v", req.Refresh.Allowance, minRenterAllowance)
+		return fmt.Errorf("renter allowance %v is less than minimum allowance %v", req.Refresh.Allowance, minRenterAllowance)
+	case totalHostCollateral.Cmp(maxCollateral) > 0:
+		return fmt.Errorf("required collateral %v exceeds max collateral %v", totalHostCollateral, maxCollateral)
 	default:
 		return nil
 	}
@@ -293,4 +302,11 @@ func (req *RPCReplenishAccountsRequest) Validate() error {
 		}
 	}
 	return nil
+}
+
+// minProofHeight returns the minimum proof height necessary for a
+// host to accept a contract. This is to ensure the contract
+// has enough time to be confirmed before the proof window begins.
+func minProofHeight(tip types.ChainIndex, hp HostPrices) uint64 {
+	return max(tip.Height, hp.TipHeight) + MinContractDuration
 }

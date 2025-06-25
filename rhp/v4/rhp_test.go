@@ -9,17 +9,22 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestMinRenterAllowance(t *testing.T) {
+func TestMinRenterAllowanceMaxHostCollateral(t *testing.T) {
 	hp := HostPrices{
 		StoragePrice: types.NewCurrency64(1), // 1 H per byte per block
 		Collateral:   types.NewCurrency64(2), // 2 H per byte per block
 	}
 
 	collateral := types.Siacoins(2)
-	minAllowance := MinRenterAllowance(hp, 1, collateral)
+	minAllowance := MinRenterAllowance(hp, collateral)
 	expected := types.Siacoins(1)
 	if !minAllowance.Equals(expected) {
 		t.Fatalf("expected %v, got %v", expected, minAllowance)
+	}
+
+	maxCollateral := MaxHostCollateral(hp, minAllowance)
+	if !maxCollateral.Equals(collateral) {
+		t.Fatalf("expected %v, got %v", collateral, maxCollateral)
 	}
 }
 
@@ -148,7 +153,7 @@ func TestRenewalCost(t *testing.T) {
 			prices.TipHeight = renewalHeight
 			renewal, _ := RenewContract(contract, prices, params)
 			tax := cs.V2FileContractTax(renewal.NewContract)
-			renter, host := RenewalCost(cs, prices, renewal, minerFee)
+			renter, host := RenewalCost(cs, renewal, minerFee)
 			if !renter.Equals(tc.RenterCost.Add(tax).Add(minerFee)) {
 				t.Errorf("expected renter cost %v, got %v", tc.RenterCost, renter.Sub(tax).Sub(minerFee))
 			} else if !host.Equals(tc.HostCost) {
